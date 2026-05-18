@@ -1,0 +1,18 @@
+# IDE
+.vscode/
+.idea/
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+build/
+
+# Generated
+*.g.dart
+*.freezed.dart
+
+# IDE 캐시
+.metadata
