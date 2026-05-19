@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/storage/token_storage.dart';
+import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/auth/presentation/screens/auth_screen.dart';
 import '../../features/tank_location/presentation/screens/tank_location_screen.dart';
 import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
@@ -10,6 +12,12 @@ import '../../features/capture/presentation/screens/capture_screen.dart';
 import '../../features/result_review/presentation/screens/result_review_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
 import 'app_shell.dart';
+
+class _RouterNotifier extends ChangeNotifier {
+  _RouterNotifier(Ref ref) {
+    ref.listen(currentInspectorProvider, (_, __) => notifyListeners());
+  }
+}
 
 class AppRoutes {
   static const login = '/login';
@@ -22,9 +30,26 @@ class AppRoutes {
 }
 
 final appRouterProvider = Provider<GoRouter>((ref) {
+  final tokenStorage = ref.watch(tokenStorageProvider);
+  final notifier = _RouterNotifier(ref);
+
   return GoRouter(
     initialLocation: AppRoutes.login,
     debugLogDiagnostics: true,
+    refreshListenable: notifier,
+    redirect: (context, state) async {
+      final token = await tokenStorage.getAccessToken();
+      final isAuthed = token != null;
+      final goingToLogin = state.matchedLocation == AppRoutes.login;
+
+      if (!isAuthed && !goingToLogin) {
+        return AppRoutes.login;  // 미인증 → 로그인으로
+      }
+      if (isAuthed && goingToLogin) {
+        return AppRoutes.tankLocation;  // 인증된 사용자가 다시 로그인 페이지로? → 탱크 선택으로
+      }
+      return null;  // 통과
+    },
     routes: [
       GoRoute(
         path: AppRoutes.login,
@@ -62,8 +87,5 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ],
       ),
     ],
-
-    // 추후 인증 가드를 여기에 추가 (06번 단계)
-    // redirect: (context, state) { ... }
   );
 });

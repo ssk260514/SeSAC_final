@@ -1,30 +1,40 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-
+import 'package:inspection_app/core/storage/token_storage.dart';
 import 'package:inspection_app/main.dart';
 
+// 테스트용 가짜 TokenStorage (플랫폼 채널 불필요)
+class _FakeTokenStorage extends Fake implements TokenStorage {
+  @override
+  Future<String?> getAccessToken() async => null;
+  @override
+  Future<String?> getRefreshToken() async => null;
+  @override
+  Future<int?> getInspectorId() async => null;
+  @override
+  Future<void> saveTokens({
+    required String accessToken,
+    required String refreshToken,
+    required int inspectorId,
+  }) async {}
+  @override
+  Future<void> clear() async {}
+}
+
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('앱 시작 시 로그인 화면이 표시된다', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          tokenStorageProvider.overrideWithValue(_FakeTokenStorage()),
+        ],
+        child: const InspectionApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // 로그인 화면 핵심 요소 확인
+    expect(find.text('로그인'), findsOneWidget);
+    expect(find.text('검사원 ID'), findsOneWidget);
   });
 }

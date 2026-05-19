@@ -29,5 +29,8 @@ async def health_check():
     return {"status": "ok", "db": "ok"}
 
 
-from app.api import auth
+from app.api import auth, tank, session
+
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(tank.router, prefix="/api", tags=["tank"])
+app.include_router(session.router, prefix="/api", tags=["session"])
