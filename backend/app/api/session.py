@@ -1,0 +1,180 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+
+from app.core.db import get_db
+from app.core.config import settings
+from app.api.deps import get_current_inspector_id
+from app.schemas.tank import (
+    CreateSessionRequest, CreateSessionResponse, ProcessInfo,
+)
+from app.schemas.session import SessionSummary, DashboardSummary
+
+
+router = APIRouter()
+
+
+@router.post("/sessions", response_model=CreateSessionResponse)
+async def create_session(
+    body: CreateSessionRequest,
+    inspector_id: int = Depends(get_current_inspector_id),
+    db: AsyncSession = Depends(get_db),
+):
+    # 1. 탱크-공정 매핑 + 세부위치 검증
+    zone = await db.execute(text("""
+        SELECT z.구역_코드, p.공정_ID, p.공정_이름, p.활성_여부
+        FROM 검사_구역 z JOIN 공정 p ON p.공정_ID = z.공정_ID
+        WHERE z.탱크_타입 = :tt
+    """), {"tt": body.tank_type})
+    zr = zone.first()
+    if zr is None:
+        raise HTTPException(status_code=400, detail={"error": "TANK_TYPE_NOT_FOUND"})
+
+    sectors_dict, process_id, process_name, is_active = zr
+    if not is_active:
+        raise HTTPException(status_code=400, detail={"error": "INVALID_PROCESS"})
+
+    if body.selected_sector not in sectors_dict:
+        raise HTTPException(status_code=400, detail={"error": "INVALID_SUBSECTOR"})
+    if body.selected_subsector not in sectors_dict[body.selected_sector]:
+        raise HTTPException(status_code=400, detail={"error": "INVALID_SUBSECTOR"})
+
+    # 2. 1일 1세션 사전 확인 (partial unique index가 race condition도 막아줌)
+    existing = await db.execute(text("""
+        SELECT 세션_ID FROM 검사_세션
+        WHERE 검사원_ID = :iid AND 세션_상태 = '진행중'
+    """), {"iid": inspector_id})
+    er = existing.first()
+    if er is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "DAILY_SESSION_EXISTS",
+                    "message": "오늘 이미 진행 중인 세션이 있습니다. 검사 이력에서 '이어서 검사'를 이용해주세요.",
+                    "existing_session_id": er[0]},
+        )
+
+    # 3. INSERT (unique violation도 잡음)
+    try:
+        ins = await db.execute(text("""
+            INSERT INTO 검사_세션 (검사원_ID, 공정_ID, 탱크_타입, 선택_구역, 선택_세부위치)
+            VALUES (:iid, :pid, :tt, :ss, :sub)
+            RETURNING 세션_ID, 시작_일시
+        """), {
+            "iid": inspector_id, "pid": process_id, "tt": body.tank_type,
+            "ss": body.selected_sector, "sub": body.selected_subsector,
+        })
+        row = ins.first()
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "DAILY_SESSION_EXISTS",
+                    "message": "오늘 이미 진행 중인 세션이 있습니다.",
+                    "existing_session_id": -1},
+        )
+
+    return CreateSessionResponse(
+        session_id=row[0],
+        status="진행중",
+        started_at=row[1].isoformat(),
+        tank_type=body.tank_type,
+        selected_sector=body.selected_sector,
+        selected_subsector=body.selected_subsector,
+        process=ProcessInfo(process_id=process_id, process_name=process_name, confidence_threshold=settings.GLOBAL_CONFIDENCE_THRESHOLD),
+    )
+
+
+@router.get("/sessions", response_model=list[SessionSummary])
+async def list_sessions(
+    status: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+    inspector_id: int = Depends(get_current_inspector_id),
+    db: AsyncSession = Depends(get_db),
+):
+    where = "검사원_ID = :iid"
+    params = {"iid": inspector_id, "lim": limit, "off": offset}
+    if status and status != "all":
+        where += " AND 세션_상태 = :st"
+        params["st"] = status
+
+    res = await db.execute(text(f"""
+        SELECT 세션_ID, 탱크_타입, 시작_일시, 종료_일시, 불량_수 > 0 AS has_defect
+        FROM 검사_세션
+        WHERE {where}
+        ORDER BY 시작_일시 DESC
+        LIMIT :lim OFFSET :off
+    """), params)
+    rows = res.all()
+    return [
+        SessionSummary(
+            session_id=r[0],
+            tank_type=r[1],
+            started_at=r[2].isoformat(),
+            ended_at=r[3].isoformat() if r[3] else None,
+            has_defect=bool(r[4]),
+        )
+        for r in rows
+    ]
+
+
+@router.get("/dashboard/summary", response_model=DashboardSummary)
+async def dashboard_summary(
+    inspector_id: int = Depends(get_current_inspector_id),
+    db: AsyncSession = Depends(get_db),
+):
+    active = await db.execute(text("""
+        SELECT 세션_ID FROM 검사_세션
+        WHERE 검사원_ID = :iid AND 세션_상태='진행중'
+              AND 시작_일시 >= CURRENT_DATE
+        LIMIT 1
+    """), {"iid": inspector_id})
+    active_id = active.scalar_one_or_none()
+
+    today = await db.execute(text("""
+        SELECT COALESCE(SUM(총_이미지_수),0), COALESCE(SUM(양품_수),0)
+        FROM 검사_세션
+        WHERE 검사원_ID = :iid AND 시작_일시 >= CURRENT_DATE
+    """), {"iid": inspector_id})
+    total_imgs, pass_imgs = today.first()
+    pass_rate = (pass_imgs / total_imgs * 100.0) if total_imgs > 0 else 0.0
+
+    recent = await db.execute(text("""
+        SELECT s.세션_ID, s.탱크_타입, s.시작_일시, s.종료_일시,
+               (s.불량_수 > 0) AS has_defect,
+               MAX(f.수정_일시) AS last_modified
+        FROM 검사_세션 s
+        LEFT JOIN 검사_피드백 f ON f.세션_ID = s.세션_ID
+        WHERE s.검사원_ID = :iid AND s.세션_상태 = '완료'
+        GROUP BY s.세션_ID
+        ORDER BY s.종료_일시 DESC NULLS LAST
+        LIMIT 3
+    """), {"iid": inspector_id})
+    recent_rows = recent.all()
+
+    session_number_row = await db.execute(text("""
+        SELECT 세션_ID FROM 검사_세션
+        WHERE 검사원_ID = :iid AND 시작_일시 >= CURRENT_DATE
+        ORDER BY 시작_일시 DESC LIMIT 1
+    """), {"iid": inspector_id})
+    session_number = session_number_row.scalar_one_or_none() or 0
+
+    return DashboardSummary(
+        session_number=session_number,
+        today_images=total_imgs,
+        today_pass_rate=round(pass_rate, 1),
+        active_session_id=active_id,
+        recent_sessions=[
+            SessionSummary(
+                session_id=r[0],
+                tank_type=r[1],
+                started_at=r[2].isoformat(),
+                ended_at=r[3].isoformat() if r[3] else None,
+                last_modified_at=r[5].isoformat() if r[5] else None,
+                has_defect=bool(r[4]),
+            )
+            for r in recent_rows
+        ],
+    )

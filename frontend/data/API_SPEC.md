@@ -468,7 +468,7 @@ Dio Interceptor가 401 응답 감지 → 자동으로 `/api/auth/refresh` 호출
 ```
 
 > `active_session_id`: 당일 진행중 세션 ID. 없으면 `null`. 클라이언트가 "검사 시작" 버튼 클릭 전 사전 가드용.
-> `recent_sessions`: 세션_상태='완료' 세션만, 최근 3건, ORDER BY 종료_일시 DESC.
+> `recent_sessions`: 세션_상태='완료' 세션만, 최근 3건, ORDER BY 종료_일시 DESC NULLS LAST.
 
 **ERD 연동**
 | 작업 | 테이블 | 컬럼 |
@@ -476,7 +476,7 @@ Dio Interceptor가 401 응답 감지 → 자동으로 `/api/auth/refresh` 호출
 | READ | `검사원` | 이름, 부서 |
 | READ | `검사_세션` | WHERE 검사원_ID AND 시작_일시 >= 오늘 |
 | READ | `검사_세션` | WHERE 세션_상태='진행중' AND 시작_일시 >= 오늘 (`active_session_id`) |
-| READ | `검사_세션` | WHERE 세션_상태='완료' ORDER BY 종료_일시 DESC LIMIT 3 |
+| READ | `검사_세션` | WHERE 세션_상태='완료' ORDER BY 종료_일시 DESC NULLS LAST LIMIT 3 |
 | READ | `검사_피드백` | MAX(수정_일시) per 세션_ID |
 
 ---

@@ -20,7 +20,7 @@ INSERT INTO 검사_구역 (탱크_타입, 구역_코드, 구역_설명, 공정_I
 -- bcrypt 해시는 Python에서 미리 생성한 값. 패스워드 = "test1234"
 INSERT INTO 검사원 (검사원_ID, 이름, 부서, 비밀번호_해시, 활성_여부) VALUES
 (1, '김검사', '제4터미널 / 안전운영팀',
- '$2b$12$LfWQpgKZBxRGYxr.HwL5/.gKi3oM7XFiR7eUVe1F6dPAxBSqGfL8.', true);
+ '$2b$12$CFDAFWex.I1gq/6Fx0NoK.GhU5LBaXOtg1jLSw3nsZbPOOHdBkKma', true);
 
 -- ID 시퀀스 보정 (수동 ID INSERT 후)
 SELECT setval('검사원_검사원_ID_seq', (SELECT MAX(검사원_ID) FROM 검사원));

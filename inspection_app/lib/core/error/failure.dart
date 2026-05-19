@@ -27,3 +27,9 @@ class ConflictFailure extends Failure {
 class UnknownFailure extends Failure {
   const UnknownFailure([super.message = '알 수 없는 오류가 발생했습니다.']);
 }
+
+class DailySessionExistsFailure extends Failure {
+  final int existingSessionId;
+  const DailySessionExistsFailure(this.existingSessionId)
+      : super("오늘 이미 진행 중인 세션이 있습니다. '이어서 검사'를 이용해주세요.");
+}
