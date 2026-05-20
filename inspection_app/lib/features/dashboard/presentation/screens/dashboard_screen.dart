@@ -8,6 +8,7 @@ import '../../../../core/storage/token_storage.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../capture/presentation/providers/capture_providers.dart';
 import '../../../tank_location/presentation/providers/tank_location_providers.dart';
 import '../../domain/entities/dashboard_summary.dart';
 import '../notifiers/dashboard_notifier.dart';
@@ -136,7 +137,23 @@ class DashboardScreen extends ConsumerWidget {
                   ElevatedButton.icon(
                     icon: const Icon(Icons.camera_alt),
                     label: const Text('검사 시작'),
-                    onPressed: () => context.go(AppRoutes.capture),
+                    onPressed: () {
+                      final summary = state.data;
+                      if (summary == null) return;
+                      if (summary.activeSessionId == null) {
+                        context.go(AppRoutes.tankLocation);
+                        return;
+                      }
+                      ref.read(currentSessionIdProvider.notifier).state = summary.activeSessionId;
+                      ref.read(currentProcessIdProvider.notifier).state = 1;
+                      ref.read(selectedTankLocationProvider.notifier).state =
+                          SelectedTankLocation(
+                            tankType: summary.activeTankType,
+                            sector: summary.activeSector,
+                            subsector: summary.activeSubsector,
+                          );
+                      context.go(AppRoutes.capture);
+                    },
                   ),
                   const SizedBox(height: 24),
 

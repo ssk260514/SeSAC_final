@@ -11,6 +11,21 @@ from app.schemas.tank import TankTypeOut, ProcessInfo
 router = APIRouter()
 
 
+def _parse_sectors(raw) -> dict:
+    """["외부-지지대", "내부-바닥"] → {"외부": ["지지대"], "내부": ["바닥"]}"""
+    if isinstance(raw, dict):
+        return raw
+    result = {}
+    for item in raw:
+        parts = item.split("-", 1)
+        if len(parts) == 2:
+            sector, sub = parts
+            result.setdefault(sector, []).append(sub)
+        else:
+            result.setdefault(item, [])
+    return result
+
+
 @router.get("/tank-types", response_model=list[TankTypeOut])
 async def list_tank_types(
     db: AsyncSession = Depends(get_db),
@@ -27,7 +42,7 @@ async def list_tank_types(
     return [
         TankTypeOut(
             tank_type=r[0],
-            sectors=r[1],
+            sectors=_parse_sectors(r[1]),
             description=r[2],
             process=ProcessInfo(
                 process_id=r[3],
@@ -58,7 +73,7 @@ async def get_tank_type_detail(
         raise HTTPException(status_code=400, detail={"error": "TANK_TYPE_NOT_FOUND"})
     return TankTypeOut(
         tank_type=r[0],
-        sectors=r[1],
+        sectors=_parse_sectors(r[1]),
         description=r[2],
         process=ProcessInfo(
             process_id=r[3],

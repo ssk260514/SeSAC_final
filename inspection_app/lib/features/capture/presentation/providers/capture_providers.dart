@@ -1,0 +1,20 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/network/dio_client.dart';
+import '../../data/datasources/capture_remote_data_source.dart';
+import '../../data/repositories/capture_repository_impl.dart';
+import '../../domain/repositories/capture_repository.dart';
+
+final captureRemoteProvider = Provider((ref) => CaptureRemoteDataSource(ref.watch(dioProvider)));
+final captureRepositoryProvider = Provider<CaptureRepository>(
+  (ref) => CaptureRepositoryImpl(ref.watch(captureRemoteProvider)),
+);
+
+/// 현재 세션 ID — 카메라 진입 시 외부에서 set
+final currentSessionIdProvider = StateProvider<int?>((_) => null);
+
+/// 현재 공정 ID
+final currentProcessIdProvider = StateProvider<int?>((_) => null);
+
+/// 백그라운드 업로드 큐 카운터 (UI 표시용)
+final pendingUploadsProvider = StateProvider<int>((_) => 0);
+final completedCapturesProvider = StateProvider<int>((_) => 0);
