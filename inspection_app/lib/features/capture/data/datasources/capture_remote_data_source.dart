@@ -13,12 +13,16 @@ class CaptureRemoteDataSource {
     required int sessionId,
     required int processId,
     required String tankType,
+    required String sector,
+    required String subsector,
   }) async {
     final form = FormData.fromMap({
       'image': await MultipartFile.fromFile(imageFile.path, filename: 'capture.jpg'),
       'session_id': sessionId,
       'process_id': processId,
       'tank_type': tankType,
+      'sector': sector,
+      'subsector': subsector,
     });
     final res = await dio.post(
       '/inspect',

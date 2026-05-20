@@ -41,6 +41,8 @@ async def inspect(
     session_id: int = Form(...),
     process_id: int = Form(...),
     tank_type: str = Form(...),
+    sector: str | None = Form(default=None),
+    subsector: str | None = Form(default=None),
     on_device_result: str | None = Form(default=None),   # JSON 문자열 (옵션)
     inspector_id: int = Depends(get_current_inspector_id),
     db: AsyncSession = Depends(get_db),
@@ -62,10 +64,10 @@ async def inspect(
 
     # 3) 검사_이미지 INSERT
     img_row = (await db.execute(text("""
-        INSERT INTO 검사_이미지 (세션_ID, 이미지_경로, 촬영_일시)
-        VALUES (:sid, :path, NOW())
+        INSERT INTO 검사_이미지 (세션_ID, 이미지_경로, 촬영_일시, 탱크_타입, 선택_구역, 선택_세부위치)
+        VALUES (:sid, :path, NOW(), :tt, :sec, :sub)
         RETURNING 이미지_ID
-    """), {"sid": session_id, "path": local_path})).first()
+    """), {"sid": session_id, "path": local_path, "tt": tank_type, "sec": sector, "sub": subsector})).first()
     image_id = img_row[0]
 
     # 4) 검사_결과 INSERT (서버 결과, 대표=true)

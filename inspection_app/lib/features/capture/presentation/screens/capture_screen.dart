@@ -57,32 +57,40 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   Future<void> _shoot() async {
     if (_ctrl == null || !_ctrl!.value.isInitialized || _ctrl!.value.isTakingPicture) return;
 
-    final xfile = await _ctrl!.takePicture();
-    final file = File(xfile.path);
-
+    // await 이전에 모든 상태 캡처 — 촬영 중 화면 이탈 시에도 업로드가 진행되도록
     final sid = ref.read(currentSessionIdProvider);
     final pid = ref.read(currentProcessIdProvider);
-    final tankType = ref.read(selectedTankLocationProvider).tankType;
-    if (sid == null || pid == null || tankType == null) {
+    final tankLoc = ref.read(selectedTankLocationProvider);
+    if (sid == null || pid == null || tankLoc.tankType == null || tankLoc.sector == null || tankLoc.subsector == null) {
       _showError('세션 정보가 없습니다. 대시보드로 돌아가 검사 시작을 다시 눌러주세요.');
       return;
     }
+    final repo = ref.read(captureRepositoryProvider);
+    final container = ProviderScope.containerOf(context);
 
-    ref.read(pendingUploadsProvider.notifier).update((s) => s + 1);
+    final xfile = await _ctrl!.takePicture();
+    final file = File(xfile.path);
+
+    container.read(pendingUploadsProvider.notifier).update((s) => s + 1);
 
     Future(() async {
       try {
-        await ref.read(captureRepositoryProvider).uploadAndInspect(
+        await repo.uploadAndInspect(
           imageFile: file,
           sessionId: sid,
           processId: pid,
-          tankType: tankType,
+          tankType: tankLoc.tankType!,
+          sector: tankLoc.sector!,
+          subsector: tankLoc.subsector!,
         );
-        ref.read(completedCapturesProvider.notifier).update((s) => s + 1);
+        container.read(completedCapturesProvider.notifier).update((s) => s + 1);
       } catch (e) {
-        if (mounted) _showError('업로드 실패: $e');
+        // 실패해도 증가시켜 검사이력 갱신을 트리거하고 오류를 알림
+        container.read(completedCapturesProvider.notifier).update((s) => s + 1);
+        container.read(uploadFailureProvider.notifier).state = e.toString();
+        debugPrint('업로드 실패: $e');
       } finally {
-        ref.read(pendingUploadsProvider.notifier).update((s) => (s - 1).clamp(0, 1 << 30));
+        container.read(pendingUploadsProvider.notifier).update((s) => (s - 1).clamp(0, 1 << 30));
       }
     });
   }
@@ -128,6 +136,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         ),
       );
     }
+
+    ref.listen(uploadFailureProvider, (_, msg) {
+      if (msg != null) {
+        _showError('업로드 실패: $msg');
+        ref.read(uploadFailureProvider.notifier).state = null;
+      }
+    });
 
     final tankLoc = ref.watch(selectedTankLocationProvider);
     final pending = ref.watch(pendingUploadsProvider);

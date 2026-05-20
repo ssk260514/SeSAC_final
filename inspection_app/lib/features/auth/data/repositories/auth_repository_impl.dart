@@ -29,6 +29,8 @@ class AuthRepositoryImpl implements AuthRepository {
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
         inspectorId: result.inspector.inspectorId,
+        inspectorName: result.inspector.name,
+        inspectorDepartment: result.inspector.department,
       );
       return result;
     } on DioException catch (e) {

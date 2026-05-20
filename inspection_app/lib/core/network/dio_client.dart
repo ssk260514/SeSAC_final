@@ -6,7 +6,10 @@ import '../storage/token_storage.dart';
 /// 백엔드 베이스 URL
 /// - 에뮬레이터: http://10.0.2.2:8000/api
 /// - 실기기: PC의 Wi-Fi LAN IP
-const String kApiBaseUrl = 'http://172.16.210.34:8000/api';
+const String kApiBaseUrl = String.fromEnvironment(
+  'API_BASE_URL',
+  defaultValue: 'http://10.0.2.2:8000/api',
+);
 
 /// 토큰 자동 첨부 + 401 자동 갱신 인터셉터
 class AuthInterceptor extends QueuedInterceptor {
@@ -50,11 +53,13 @@ class AuthInterceptor extends QueuedInterceptor {
         final newAccess = res.data['access_token'] as String;
         final refreshOld = await tokenStorage.getRefreshToken();
         final inspectorId = await tokenStorage.getInspectorId();
-        if (refreshOld != null && inspectorId != null) {
+        final inspectorName = await tokenStorage.getInspectorName();
+        if (refreshOld != null && inspectorId != null && inspectorName != null) {
           await tokenStorage.saveTokens(
             accessToken: newAccess,
             refreshToken: refreshOld,
             inspectorId: inspectorId,
+            inspectorName: inspectorName,
           );
         }
 
@@ -92,8 +97,8 @@ final dioProvider = Provider<Dio>((ref) {
   ));
 
   dio.interceptors.add(LogInterceptor(
-    requestBody: false,
-    responseBody: false,
+    requestBody: true,
+    responseBody: true,
     request: true,
     requestHeader: false,
     responseHeader: false,

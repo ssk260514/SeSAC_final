@@ -6,6 +6,7 @@ import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../notifiers/tank_location_notifier.dart';
+import '../providers/tank_location_providers.dart';
 
 class TankLocationScreen extends ConsumerStatefulWidget {
   const TankLocationScreen({super.key});
@@ -23,24 +24,33 @@ class _TankLocationScreenState extends ConsumerState<TankLocationScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(tankLocationNotifierProvider);
+    final extra = GoRouterState.of(context).extra as Map<String, dynamic>?;
+    final fromDashboard = extra?['fromDashboard'] == true;
+
+    Widget? leadingButton;
+    if (_step == 2) {
+      leadingButton = IconButton(
+        icon: const Icon(Icons.arrow_back),
+        onPressed: () {
+          setState(() {
+            _step = 1;
+            _selectedSector = null;
+            _selectedSubsector = null;
+          });
+        },
+      );
+    } else if (fromDashboard) {
+      leadingButton = IconButton(
+        icon: const Icon(Icons.arrow_back),
+        onPressed: () => context.go(AppRoutes.dashboard),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
         title: Text(_step == 1 ? '탱크 유형 선택' : '위치 선택'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            if (_step == 2) {
-              setState(() {
-                _step = 1;
-                _selectedSector = null;
-                _selectedSubsector = null;
-              });
-            } else {
-              context.go(AppRoutes.login);
-            }
-          },
-        ),
+        automaticallyImplyLeading: false,
+        leading: leadingButton,
       ),
       body: state.isLoading && state.zones.isEmpty
           ? const Center(child: CircularProgressIndicator())
@@ -113,44 +123,17 @@ class _TankLocationScreenState extends ConsumerState<TankLocationScreen> {
           const Spacer(),
 
           ElevatedButton(
-            onPressed:
-                (_selectedSector != null && _selectedSubsector != null && !state.isLoading)
-                    ? () async {
-                        final session = await ref
-                            .read(tankLocationNotifierProvider.notifier)
-                            .confirmSelection(
-                              tankType: _selectedTank!,
-                              sector: _selectedSector!,
-                              subsector: _selectedSubsector!,
-                            );
-                        if (!mounted) return;
-                        if (session != null) {
-                          context.go(AppRoutes.dashboard);
-                        } else {
-                          final s = ref.read(tankLocationNotifierProvider);
-                          if (s.existingSessionId != null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(s.errorMessage ?? '이미 세션이 있습니다.')),
-                            );
-                            context.go(AppRoutes.history);
-                          } else if (s.errorMessage != null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(s.errorMessage!),
-                                backgroundColor: AppColors.error,
-                              ),
-                            );
-                          }
-                        }
-                      }
-                    : null,
-            child: state.isLoading
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2.5),
-                  )
-                : const Text('확인'),
+            onPressed: (_selectedSector != null && _selectedSubsector != null)
+                ? () {
+                    ref.read(selectedTankLocationProvider.notifier).state = SelectedTankLocation(
+                      tankType: _selectedTank,
+                      sector: _selectedSector,
+                      subsector: _selectedSubsector,
+                    );
+                    context.go(AppRoutes.dashboard);
+                  }
+                : null,
+            child: const Text('확인'),
           ),
           const SizedBox(height: 16),
         ],

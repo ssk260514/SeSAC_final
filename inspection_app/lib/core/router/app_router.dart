@@ -42,13 +42,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final isAuthed = token != null;
       final goingToLogin = state.matchedLocation == AppRoutes.login;
 
-      if (!isAuthed && !goingToLogin) {
-        return AppRoutes.login;  // 미인증 → 로그인으로
-      }
-      if (isAuthed && goingToLogin) {
-        return AppRoutes.tankLocation;  // 인증된 사용자가 다시 로그인 페이지로? → 탱크 선택으로
-      }
-      return null;  // 통과
+      if (!isAuthed && !goingToLogin) return AppRoutes.login;
+      if (isAuthed && goingToLogin) return AppRoutes.tankLocation;
+      return null;
     },
     routes: [
       GoRoute(

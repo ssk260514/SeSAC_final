@@ -16,6 +16,21 @@ class InspectionHistoryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // watch로 현재 값도 즉시 감지 — listen만 쓰면 화면 진입 전 실패를 놓침
+    final uploadFailure = ref.watch(uploadFailureProvider);
+    if (uploadFailure != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('업로드 실패: $uploadFailure'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        ref.read(uploadFailureProvider.notifier).state = null;
+      });
+    }
+
     final sessionId = ref.watch(currentSessionIdProvider);
     if (sessionId == null) {
       return Scaffold(
@@ -56,11 +71,20 @@ class InspectionHistoryScreen extends ConsumerWidget {
             ),
           ),
 
+          if (state.errorMessage != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Text(
+                '오류: ${state.errorMessage}',
+                style: const TextStyle(color: Colors.red, fontSize: 12),
+              ),
+            ),
+
           Expanded(
             child: state.isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : state.cards.isEmpty
-                    ? _emptyState(state.filter)
+                    ? _emptyStateContent(state.filter)
                     : RefreshIndicator(
                         onRefresh: notifier.refresh,
                         child: ListView.builder(
@@ -78,7 +102,10 @@ class InspectionHistoryScreen extends ConsumerWidget {
                 ElevatedButton.icon(
                   icon: const Icon(Icons.camera_alt),
                   label: const Text('이어서 검사'),
-                  onPressed: () => context.go(AppRoutes.capture),
+                  onPressed: () {
+                    ref.read(currentProcessIdProvider.notifier).state = 1;
+                    context.go(AppRoutes.capture);
+                  },
                 ),
                 const SizedBox(height: 8),
                 ElevatedButton.icon(
@@ -110,7 +137,7 @@ class InspectionHistoryScreen extends ConsumerWidget {
   }
 
   void _onCardTap(BuildContext context, ResultCard card) {
-    if (card.isDefect && card.resultStatus == '미완료') {
+    if (card.resultStatus == '미완료') {
       showModalBottomSheet(
         context: context,
         isScrollControlled: true,
@@ -118,14 +145,12 @@ class InspectionHistoryScreen extends ConsumerWidget {
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
         builder: (_) => DetailModal(imageId: card.imageId),
       );
-    } else if (!card.isDefect && card.resultStatus == '미완료') {
-      context.go('${AppRoutes.result}?imageId=${card.imageId}');
     } else if (card.resultStatus == '완료') {
       context.go('${AppRoutes.result}?imageId=${card.imageId}');
     }
   }
 
-  Widget _emptyState(FilterType f) {
+  Widget _emptyStateContent(FilterType f) {
     final (icon, title, sub) = switch (f) {
       FilterType.all => (Icons.photo_camera, '아직 촬영한 이미지가 없습니다', "'이어서 검사'를 눌러 촬영을 시작하세요"),
       FilterType.completed => (Icons.assignment_turned_in, '완료된 검사 결과가 없습니다', '결과 처리가 끝난 항목이 여기에 표시됩니다'),
