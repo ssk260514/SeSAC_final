@@ -118,6 +118,8 @@ class InspectionHistoryScreen extends ConsumerWidget {
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
         builder: (_) => DetailModal(imageId: card.imageId),
       );
+    } else if (!card.isDefect && card.resultStatus == '미완료') {
+      context.go('${AppRoutes.result}?imageId=${card.imageId}');
     } else if (card.resultStatus == '완료') {
       context.go('${AppRoutes.result}?imageId=${card.imageId}');
     }
@@ -206,7 +208,7 @@ class _Card extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(
-                            color: tagColor.withOpacity(0.1),
+                            color: tagColor.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(tagText, style: AppTextStyles.labelBold.copyWith(color: tagColor)),

@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -107,6 +109,21 @@ async def get_image_detail(
             out["gradcam_url"] = r[6]
         return out
 
+    feedback = None
+    if server is not None:
+        fb = (await db.execute(text("""
+            SELECT 피드백_ID, 수정된_결함_유형, 심각도, 의견, 최종_조치_내용
+            FROM 검사_피드백 WHERE 결과_ID = :rid
+        """), {"rid": server[0]})).first()
+        if fb is not None:
+            feedback = {
+                "feedback_id": fb[0],
+                "modified_defect_type": fb[1],
+                "severity": fb[2],
+                "opinion": fb[3],
+                "final_action_content": fb[4],
+            }
+
     return {
         "image": {
             "image_id": img[0],
@@ -122,5 +139,82 @@ async def get_image_detail(
             "detail": "",
             "source_manuals": [],
         },
-        "feedback": None,
+        "feedback": feedback,
     }
+
+
+@router.post("/results/{result_id}/feedback")
+async def save_feedback(
+    result_id: int,
+    body: dict,
+    inspector_id: int = Depends(get_current_inspector_id),
+    db: AsyncSession = Depends(get_db),
+):
+    r = (await db.execute(text("""
+        SELECT 결과_ID, 결함_유형, (SELECT 세션_ID FROM 검사_이미지 WHERE 이미지_ID = r.이미지_ID)
+        FROM 검사_결과 r WHERE 결과_ID = :rid
+    """), {"rid": result_id})).first()
+    if r is None:
+        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND"})
+
+    original_type = r[1]
+    session_id = body.get("session_id") or r[2]
+    modified_type = body.get("modified_defect_type")
+    inspector_modified = modified_type is not None and modified_type != original_type
+
+    upsert = await db.execute(text("""
+        INSERT INTO 검사_피드백 (
+            결과_ID, 검사원_ID, 세션_ID,
+            검사원_수정_여부, 수정된_결함_유형, 심각도, 의견, 최종_조치_내용,
+            생성_일시, 수정_일시
+        ) VALUES (
+            :rid, :iid, :sid, :modified, :mtype, :sev, :op, :fa, NOW(), NOW()
+        )
+        ON CONFLICT (결과_ID) DO UPDATE SET
+            검사원_수정_여부 = EXCLUDED.검사원_수정_여부,
+            수정된_결함_유형 = EXCLUDED.수정된_결함_유형,
+            심각도 = EXCLUDED.심각도,
+            의견 = EXCLUDED.의견,
+            최종_조치_내용 = EXCLUDED.최종_조치_내용,
+            수정_일시 = NOW()
+        RETURNING 피드백_ID
+    """), {
+        "rid": result_id, "iid": inspector_id, "sid": session_id,
+        "modified": inspector_modified, "mtype": modified_type,
+        "sev": body.get("severity"), "op": body.get("opinion"),
+        "fa": body.get("final_action_content"),
+    })
+    feedback_id = upsert.scalar_one()
+
+    await db.execute(text("""
+        UPDATE 검사_결과 SET 결과_처리_상태='완료', 완료_일시=NOW() WHERE 결과_ID = :rid
+    """), {"rid": result_id})
+
+    await db.commit()
+    return {
+        "feedback_id": feedback_id,
+        "result_id": result_id,
+        "inspector_modified": inspector_modified,
+        "result_status": "완료",
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.patch("/recommendations/{recommendation_id}")
+async def update_recommendation(
+    recommendation_id: int,
+    body: dict,
+    inspector_id: int = Depends(get_current_inspector_id),
+    db: AsyncSession = Depends(get_db),
+):
+    detail = body.get("action_detail")
+    if detail is None:
+        raise HTTPException(status_code=400, detail={"error": "MISSING_FIELD"})
+    res = await db.execute(text("""
+        UPDATE 조치_권고 SET 조치_상세 = :d, 수정_일시 = NOW()
+        WHERE 권고_ID = :rid RETURNING 권고_ID
+    """), {"d": detail, "rid": recommendation_id})
+    if res.first() is None:
+        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND"})
+    await db.commit()
+    return {"recommendation_id": recommendation_id, "saved_at": datetime.now(timezone.utc).isoformat()}
