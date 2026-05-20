@@ -17,6 +17,8 @@ class CaptureRepositoryImpl implements CaptureRepository {
     required int sessionId,
     required int processId,
     required String tankType,
+    required String sector,
+    required String subsector,
   }) async {
     try {
       final dto = await remote.uploadAndInspect(
@@ -24,6 +26,8 @@ class CaptureRepositoryImpl implements CaptureRepository {
         sessionId: sessionId,
         processId: processId,
         tankType: tankType,
+        sector: sector,
+        subsector: subsector,
       );
       return dto.toEntity();
     } on DioException catch (e) {

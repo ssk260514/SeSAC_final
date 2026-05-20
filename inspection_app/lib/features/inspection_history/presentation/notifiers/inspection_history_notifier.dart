@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 import '../../../../core/error/failure.dart';
 import '../../../../core/network/dio_client.dart';
+import '../../../capture/presentation/providers/capture_providers.dart';
 import '../../data/datasources/inspection_history_remote_data_source.dart';
 import '../../domain/entities/result_card.dart';
 
@@ -20,8 +22,8 @@ class InspectionHistoryState with _$InspectionHistoryState {
   }) = _InspectionHistoryState;
 }
 
-final inspectionHistoryNotifierProvider = StateNotifierProvider.family<
-    InspectionHistoryNotifier, InspectionHistoryState, int>(
+final inspectionHistoryNotifierProvider =
+    StateNotifierProvider.autoDispose.family<InspectionHistoryNotifier, InspectionHistoryState, int>(
   (ref, sessionId) => InspectionHistoryNotifier(ref, sessionId),
 );
 
@@ -30,6 +32,9 @@ class InspectionHistoryNotifier extends StateNotifier<InspectionHistoryState> {
   final int sessionId;
   InspectionHistoryNotifier(this.ref, this.sessionId) : super(const InspectionHistoryState()) {
     refresh();
+    ref.listen(completedCapturesProvider, (prev, next) {
+      if (next > (prev ?? 0)) refresh();
+    });
   }
 
   void setFilter(FilterType f) {
@@ -46,9 +51,12 @@ class InspectionHistoryNotifier extends StateNotifier<InspectionHistoryState> {
         FilterType.completed => '완료',
         FilterType.incomplete => '미완료',
       };
+      debugPrint('[History] refresh() sessionId=$sessionId status=$statusParam');
       final dtos = await ds.listResults(sessionId, statusParam);
+      debugPrint('[History] refresh() cards=${dtos.length}');
       state = state.copyWith(isLoading: false, cards: dtos.map((d) => d.toEntity()).toList());
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[History] refresh() ERROR: $e\n$st');
       state = state.copyWith(isLoading: false, errorMessage: e.toString());
     }
   }

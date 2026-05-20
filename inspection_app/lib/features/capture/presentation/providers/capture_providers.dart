@@ -18,3 +18,6 @@ final currentProcessIdProvider = StateProvider<int?>((_) => null);
 /// 백그라운드 업로드 큐 카운터 (UI 표시용)
 final pendingUploadsProvider = StateProvider<int>((_) => 0);
 final completedCapturesProvider = StateProvider<int>((_) => 0);
+
+/// 업로드 실패 메시지 — 화면 이탈 후 실패해도 이력 화면에서 SnackBar 표시 가능
+final uploadFailureProvider = StateProvider<String?>((_) => null);

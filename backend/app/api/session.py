@@ -139,12 +139,21 @@ async def dashboard_summary(
     active_sector = active_row[2] if active_row else None
     active_subsector = active_row[3] if active_row else None
 
-    today = await db.execute(text("""
-        SELECT COALESCE(SUM(총_이미지_수),0), COALESCE(SUM(양품_수),0)
-        FROM 검사_세션
-        WHERE 검사원_ID = :iid AND 시작_일시 >= CURRENT_DATE
-    """), {"iid": inspector_id})
-    total_imgs, pass_imgs = today.first()
+    # 통계 기준: 진행중 세션이 있으면 그 세션, 없으면 가장 최근 완료 세션
+    if active_id is not None:
+        stats_row = (await db.execute(text("""
+            SELECT 세션_ID, 총_이미지_수, 양품_수 FROM 검사_세션 WHERE 세션_ID = :sid
+        """), {"sid": active_id})).first()
+    else:
+        stats_row = (await db.execute(text("""
+            SELECT 세션_ID, 총_이미지_수, 양품_수 FROM 검사_세션
+            WHERE 검사원_ID = :iid AND 세션_상태 = '완료'
+            ORDER BY 종료_일시 DESC NULLS LAST LIMIT 1
+        """), {"iid": inspector_id})).first()
+
+    session_number = stats_row[0] if stats_row else 0
+    total_imgs = stats_row[1] if stats_row else 0
+    pass_imgs = stats_row[2] if stats_row else 0
     pass_rate = (pass_imgs / total_imgs * 100.0) if total_imgs > 0 else 0.0
 
     recent = await db.execute(text("""
@@ -159,13 +168,6 @@ async def dashboard_summary(
         LIMIT 3
     """), {"iid": inspector_id})
     recent_rows = recent.all()
-
-    session_number_row = await db.execute(text("""
-        SELECT 세션_ID FROM 검사_세션
-        WHERE 검사원_ID = :iid AND 시작_일시 >= CURRENT_DATE
-        ORDER BY 시작_일시 DESC LIMIT 1
-    """), {"iid": inspector_id})
-    session_number = session_number_row.scalar_one_or_none() or 0
 
     return DashboardSummary(
         session_number=session_number,

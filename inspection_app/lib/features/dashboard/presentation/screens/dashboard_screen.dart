@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../core/error/failure.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/storage/token_storage.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -22,6 +23,21 @@ class DashboardScreen extends ConsumerWidget {
     final inspector = ref.watch(currentInspectorProvider);
     final tankLoc = ref.watch(selectedTankLocationProvider);
 
+    // 진행중 세션이 있으면 currentSessionIdProvider 자동 복원 (앱 재시작 후에도 히스토리 화면이 작동하도록)
+    ref.listen(dashboardNotifierProvider, (_, next) {
+      final active = next.data?.activeSessionId;
+      if (active != null && ref.read(currentSessionIdProvider) != active) {
+        ref.read(currentSessionIdProvider.notifier).state = active;
+        if (next.data?.activeTankType != null) {
+          ref.read(selectedTankLocationProvider.notifier).state = SelectedTankLocation(
+            tankType: next.data!.activeTankType,
+            sector: next.data!.activeSector,
+            subsector: next.data!.activeSubsector,
+          );
+        }
+      }
+    });
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -38,14 +54,14 @@ class DashboardScreen extends ConsumerWidget {
                   color: AppColors.onPrimaryContainer, size: 20),
             ),
             const SizedBox(width: 8),
-            const Text('LNG Inspection'),
+            const Text('LNG Inspection', style: TextStyle(color: Colors.black)),
           ],
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.edit_location_alt_outlined),
-            tooltip: '위치 변경',
-            onPressed: () => context.go(AppRoutes.tankLocation),
+            tooltip: '탱크 타입 변경',
+            onPressed: () => context.go(AppRoutes.tankLocation, extra: {'fromDashboard': true}),
           ),
           IconButton(
             icon: const Icon(Icons.notifications_outlined),
@@ -133,32 +149,44 @@ class DashboardScreen extends ConsumerWidget {
                   if (state.data != null) _StatsRow(data: state.data!),
                   const SizedBox(height: 24),
 
-                  // 검사 시작 버튼
+                  // 검사 시작 버튼 — 진행중 세션 없을 때만 활성화, 클릭 시 세션 생성 + 카메라 이동
                   ElevatedButton.icon(
                     icon: const Icon(Icons.camera_alt),
                     label: const Text('검사 시작'),
-                    onPressed: () {
-                      final summary = state.data;
-                      if (summary == null) return;
-                      if (summary.activeSessionId == null) {
-                        context.go(AppRoutes.tankLocation);
-                        return;
-                      }
-                      ref.read(currentSessionIdProvider.notifier).state = summary.activeSessionId;
-                      ref.read(currentProcessIdProvider.notifier).state = 1;
-                      ref.read(selectedTankLocationProvider.notifier).state =
-                          SelectedTankLocation(
-                            tankType: summary.activeTankType,
-                            sector: summary.activeSector,
-                            subsector: summary.activeSubsector,
-                          );
-                      context.go(AppRoutes.capture);
-                    },
+                    onPressed: (state.data == null || state.data!.activeSessionId != null)
+                        ? null
+                        : () async {
+                            if (tankLoc.tankType == null || tankLoc.sector == null || tankLoc.subsector == null) {
+                              context.go(AppRoutes.tankLocation);
+                              return;
+                            }
+                            try {
+                              final session = await ref.read(tankLocationRepositoryProvider).createSession(
+                                tankType: tankLoc.tankType!,
+                                selectedSector: tankLoc.sector!,
+                                selectedSubsector: tankLoc.subsector!,
+                              );
+                              if (!context.mounted) return;
+                              ref.read(currentSessionIdProvider.notifier).state = session.sessionId;
+                              ref.read(currentProcessIdProvider.notifier).state = 1;
+                              context.go(AppRoutes.capture);
+                            } on DailySessionExistsFailure catch (f) {
+                              ref.read(currentSessionIdProvider.notifier).state = f.existingSessionId;
+                              ref.read(currentProcessIdProvider.notifier).state = 1;
+                              if (!context.mounted) return;
+                              context.go(AppRoutes.capture);
+                            } catch (e) {
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+                              );
+                            }
+                          },
                   ),
                   const SizedBox(height: 24),
 
                   // 최근 세션 이력
-                  Text('최근 세션 이력', style: AppTextStyles.h2),
+                  const Text('최근 세션 이력', style: AppTextStyles.h2),
                   const SizedBox(height: 8),
                   if (state.data == null || state.data!.recentSessions.isEmpty)
                     const _EmptyRecent()
