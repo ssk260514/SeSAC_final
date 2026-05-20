@@ -6,8 +6,7 @@ import '../storage/token_storage.dart';
 /// 백엔드 베이스 URL
 /// - 에뮬레이터: http://10.0.2.2:8000/api
 /// - 실기기: PC의 Wi-Fi LAN IP
-const String kApiBaseUrl = 'http://192.168.0.8:8000/api';
-
+const String kApiBaseUrl = 'http://172.16.210.34:8000/api';
 
 /// 토큰 자동 첨부 + 401 자동 갱신 인터셉터
 class AuthInterceptor extends QueuedInterceptor {
@@ -22,8 +21,10 @@ class AuthInterceptor extends QueuedInterceptor {
   });
 
   @override
-  Future<void> onRequest(RequestOptions options, RequestInterceptorHandler handler) async {
-    if (!options.path.endsWith('/auth/login') && !options.path.endsWith('/auth/refresh')) {
+  Future<void> onRequest(
+      RequestOptions options, RequestInterceptorHandler handler) async {
+    if (!options.path.endsWith('/auth/login') &&
+        !options.path.endsWith('/auth/refresh')) {
       final token = await tokenStorage.getAccessToken();
       if (token != null) {
         options.headers['Authorization'] = 'Bearer $token';
@@ -33,7 +34,8 @@ class AuthInterceptor extends QueuedInterceptor {
   }
 
   @override
-  Future<void> onError(DioException err, ErrorInterceptorHandler handler) async {
+  Future<void> onError(
+      DioException err, ErrorInterceptorHandler handler) async {
     if (err.response?.statusCode == 401) {
       final refresh = await tokenStorage.getRefreshToken();
       if (refresh == null) {
@@ -68,7 +70,6 @@ class AuthInterceptor extends QueuedInterceptor {
     handler.next(err);
   }
 }
-
 
 final dioProvider = Provider<Dio>((ref) {
   final tokenStorage = ref.watch(tokenStorageProvider);

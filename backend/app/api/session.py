@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.db import get_db
 from app.core.config import settings
 from app.api.deps import get_current_inspector_id
+from app.api.tank import _parse_sectors
 from app.schemas.tank import (
     CreateSessionRequest, CreateSessionResponse, ProcessInfo,
 )
@@ -31,10 +32,11 @@ async def create_session(
     if zr is None:
         raise HTTPException(status_code=400, detail={"error": "TANK_TYPE_NOT_FOUND"})
 
-    sectors_dict, process_id, process_name, is_active = zr
+    raw_sectors, process_id, process_name, is_active = zr
     if not is_active:
         raise HTTPException(status_code=400, detail={"error": "INVALID_PROCESS"})
 
+    sectors_dict = _parse_sectors(raw_sectors)
     if body.selected_sector not in sectors_dict:
         raise HTTPException(status_code=400, detail={"error": "INVALID_SUBSECTOR"})
     if body.selected_subsector not in sectors_dict[body.selected_sector]:
@@ -126,12 +128,16 @@ async def dashboard_summary(
     db: AsyncSession = Depends(get_db),
 ):
     active = await db.execute(text("""
-        SELECT 세션_ID FROM 검사_세션
+        SELECT 세션_ID, 탱크_타입, 선택_구역, 선택_세부위치 FROM 검사_세션
         WHERE 검사원_ID = :iid AND 세션_상태='진행중'
-              AND 시작_일시 >= CURRENT_DATE
+        ORDER BY 시작_일시 DESC
         LIMIT 1
     """), {"iid": inspector_id})
-    active_id = active.scalar_one_or_none()
+    active_row = active.first()
+    active_id = active_row[0] if active_row else None
+    active_tank_type = active_row[1] if active_row else None
+    active_sector = active_row[2] if active_row else None
+    active_subsector = active_row[3] if active_row else None
 
     today = await db.execute(text("""
         SELECT COALESCE(SUM(총_이미지_수),0), COALESCE(SUM(양품_수),0)
@@ -166,6 +172,9 @@ async def dashboard_summary(
         today_images=total_imgs,
         today_pass_rate=round(pass_rate, 1),
         active_session_id=active_id,
+        active_tank_type=active_tank_type,
+        active_sector=active_sector,
+        active_subsector=active_subsector,
         recent_sessions=[
             SessionSummary(
                 session_id=r[0],

@@ -41,6 +41,9 @@ class DashboardSummaryDto with _$DashboardSummaryDto {
     required int today_images,
     required double today_pass_rate,
     int? active_session_id,
+    String? active_tank_type,
+    String? active_sector,
+    String? active_subsector,
     required List<SessionSummaryDto> recent_sessions,
   }) = _DashboardSummaryDto;
 
@@ -52,6 +55,9 @@ class DashboardSummaryDto with _$DashboardSummaryDto {
         todayImages: today_images,
         todayPassRate: today_pass_rate,
         activeSessionId: active_session_id,
+        activeTankType: active_tank_type,
+        activeSector: active_sector,
+        activeSubsector: active_subsector,
         recentSessions: recent_sessions.map((s) => s.toEntity()).toList(),
       );
 }

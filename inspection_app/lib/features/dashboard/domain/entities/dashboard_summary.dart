@@ -21,6 +21,9 @@ class DashboardSummary {
   final int todayImages;
   final double todayPassRate;
   final int? activeSessionId;
+  final String? activeTankType;
+  final String? activeSector;
+  final String? activeSubsector;
   final List<SessionSummary> recentSessions;
 
   const DashboardSummary({
@@ -28,6 +31,9 @@ class DashboardSummary {
     required this.todayImages,
     required this.todayPassRate,
     this.activeSessionId,
+    this.activeTankType,
+    this.activeSector,
+    this.activeSubsector,
     required this.recentSessions,
   });
 }

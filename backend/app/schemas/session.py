@@ -15,4 +15,7 @@ class DashboardSummary(BaseModel):
     today_images: int
     today_pass_rate: float
     active_session_id: int | None
+    active_tank_type: str | None = None
+    active_sector: str | None = None
+    active_subsector: str | None = None
     recent_sessions: list[SessionSummary]
