@@ -187,3 +187,34 @@ async def dashboard_summary(
             for r in recent_rows
         ],
     )
+
+
+@router.patch("/sessions/{session_id}/end")
+async def end_session(
+    session_id: int,
+    inspector_id: int = Depends(get_current_inspector_id),
+    db: AsyncSession = Depends(get_db),
+):
+    s = (await db.execute(text("""
+        SELECT 세션_상태 FROM 검사_세션 WHERE 세션_ID = :sid AND 검사원_ID = :iid
+    """), {"sid": session_id, "iid": inspector_id})).first()
+    if s is None:
+        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND"})
+    if s[0] != '진행중':
+        raise HTTPException(status_code=400, detail={"error": "SESSION_NOT_ACTIVE"})
+
+    incomplete = (await db.execute(text("""
+        SELECT COUNT(*) FROM 검사_결과 r
+        JOIN 검사_이미지 i ON i.이미지_ID = r.이미지_ID
+        WHERE i.세션_ID = :sid AND r.대표_여부=true AND r.결과_처리_상태='미완료'
+    """), {"sid": session_id})).scalar()
+    if incomplete and incomplete > 0:
+        raise HTTPException(status_code=400, detail={"error": "INCOMPLETE_RESULTS_EXIST", "incomplete_count": incomplete})
+
+    end = (await db.execute(text("""
+        UPDATE 검사_세션 SET 세션_상태='완료', 종료_일시=NOW()
+        WHERE 세션_ID = :sid RETURNING 종료_일시
+    """), {"sid": session_id})).first()
+    await db.commit()
+
+    return {"session_id": session_id, "status": "완료", "ended_at": end[0].isoformat()}
