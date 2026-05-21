@@ -1,6 +1,9 @@
 sealed class Failure {
   final String message;
   const Failure(this.message);
+
+  @override
+  String toString() => message;
 }
 
 class NetworkFailure extends Failure {
@@ -32,4 +35,9 @@ class DailySessionExistsFailure extends Failure {
   final int existingSessionId;
   const DailySessionExistsFailure(this.existingSessionId)
       : super("오늘 이미 진행 중인 세션이 있습니다. '이어서 검사'를 이용해주세요.");
+}
+
+class QueuedOfflineFailure extends Failure {
+  const QueuedOfflineFailure()
+      : super('오프라인 — 검사 결과를 저장했습니다. 네트워크 복구 시 자동으로 업로드됩니다.');
 }

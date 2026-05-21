@@ -20,11 +20,13 @@ dependencies:
 
   # 네트워크
   dio: ^5.7.0
+  tflite_flutter: ^0.12.0
 
   # 저장소
   flutter_secure_storage: ^9.2.2
   sqflite: ^2.3.3
   path_provider: ^2.1.4
+  path: ^1.9.0
 
   # 카메라·권한
   camera: ^0.11.0

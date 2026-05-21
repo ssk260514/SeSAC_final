@@ -1,12 +1,37 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../data/datasources/capture_remote_data_source.dart';
+import '../../data/local/offline_queue.dart';
+import '../../data/local/offline_sync_service.dart';
+import '../../data/local/tflite_inference_service.dart';
 import '../../data/repositories/capture_repository_impl.dart';
 import '../../domain/repositories/capture_repository.dart';
 
+final tfliteServiceProvider = Provider<TfliteInferenceService>((ref) {
+  final s = TfliteInferenceService();
+  ref.onDispose(() => s.dispose());
+  return s;
+});
+
+final offlineQueueProvider = Provider<OfflineQueueDb>((_) => OfflineQueueDb());
+
+final offlineSyncProvider = Provider<OfflineSyncService>((ref) {
+  final svc = OfflineSyncService(
+    queue: ref.watch(offlineQueueProvider),
+    dio: ref.watch(dioProvider),
+  );
+  ref.onDispose(svc.stop);
+  return svc;
+});
+
 final captureRemoteProvider = Provider((ref) => CaptureRemoteDataSource(ref.watch(dioProvider)));
 final captureRepositoryProvider = Provider<CaptureRepository>(
-  (ref) => CaptureRepositoryImpl(ref.watch(captureRemoteProvider)),
+  (ref) => CaptureRepositoryImpl(
+    remote: ref.watch(captureRemoteProvider),
+    tflite: ref.watch(tfliteServiceProvider),
+    queue: ref.watch(offlineQueueProvider),
+    dio: ref.watch(dioProvider),
+  ),
 );
 
 /// 현재 세션 ID — 카메라 진입 시 외부에서 set

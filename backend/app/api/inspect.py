@@ -64,13 +64,36 @@ async def inspect(
 
     # 3) 검사_이미지 INSERT
     img_row = (await db.execute(text("""
-        INSERT INTO 검사_이미지 (세션_ID, 이미지_경로, 촬영_일시, 탱크_타입, 선택_구역, 선택_세부위치)
-        VALUES (:sid, :path, NOW(), :tt, :sec, :sub)
+        INSERT INTO 검사_이미지 (세션_ID, 이미지_경로, 촬영_일시)
+        VALUES (:sid, :path, NOW())
         RETURNING 이미지_ID
-    """), {"sid": session_id, "path": local_path, "tt": tank_type, "sec": sector, "sub": subsector})).first()
+    """), {"sid": session_id, "path": local_path})).first()
     image_id = img_row[0]
 
-    # 4) 검사_결과 INSERT (서버 결과, 대표=true)
+    # 4-a) 단말 결과 INSERT (on_device_result가 있을 때)
+    if on_device_result:
+        import json as _json
+        dev = _json.loads(on_device_result)
+        await db.execute(text("""
+            INSERT INTO 검사_결과 (
+                이미지_ID, 공정_ID, 추론_위치, 대표_여부, 품질_여부,
+                결함_유형, 신뢰도_점수, 상위_예측, 추론_지연_ms,
+                사람_재확인_필요, 결과_처리_상태
+            ) VALUES (
+                :iid, :pid, '단말', false, :ok,
+                :dtype, :conf, CAST(:top3 AS JSONB), :ms,
+                false, '완료'
+            )
+        """), {
+            "iid": image_id, "pid": process_id,
+            "ok": "양품" in dev.get("defect_type", ""),
+            "dtype": dev.get("defect_type", ""),
+            "conf": dev.get("confidence", 0),
+            "top3": _json.dumps(dev.get("top3_predictions", [])),
+            "ms": dev.get("inference_ms", 0),
+        })
+
+    # 4-b) 검사_결과 INSERT (서버 결과, 대표=true)
     res_row = (await db.execute(text("""
         INSERT INTO 검사_결과 (
             이미지_ID, 공정_ID, 추론_위치, 대표_여부, 품질_여부,
@@ -154,3 +177,70 @@ async def local_result(
     """), {"sid": sid})
     await db.commit()
     return {"image_id": image_id, "result_id": res_row[0]}
+
+
+@router.post("/inspect/offline-batch")
+async def offline_batch(
+    images: list[UploadFile] = File(...),
+    metadata: str = Form(...),
+    inspector_id: int = Depends(get_current_inspector_id),
+    db: AsyncSession = Depends(get_db),
+):
+    import json
+    metas = json.loads(metadata)
+    if len(metas) != len(images):
+        raise HTTPException(status_code=400, detail={"error": "METADATA_IMAGE_COUNT_MISMATCH"})
+    if len(metas) > 50:
+        raise HTTPException(status_code=400, detail={"error": "BATCH_SIZE_LIMIT_EXCEEDED"})
+
+    results = []
+    for img_file, meta in zip(images, metas):
+        try:
+            _WEIGHTS = [3 if "양품" in c else 1 for c in _CLASSES]
+            top1 = random.choices(_CLASSES, weights=_WEIGHTS)[0]
+            conf = round(random.uniform(0.55, 0.99), 3)
+            is_defect_flag = _is_defect(top1)
+
+            img_row = (await db.execute(text("""
+                INSERT INTO 검사_이미지 (세션_ID, 이미지_경로, 촬영_일시)
+                VALUES (:sid, :path, NOW())
+                RETURNING 이미지_ID
+            """), {"sid": meta["session_id"], "path": f"local://batch/{meta['client_request_id']}.jpg"})).first()
+            image_id = img_row[0]
+
+            res_row = (await db.execute(text("""
+                INSERT INTO 검사_결과 (이미지_ID, 공정_ID, 추론_위치, 대표_여부, 품질_여부,
+                    결함_유형, 신뢰도_점수, 추론_지연_ms, 결과_처리_상태)
+                VALUES (:iid, :pid, '서버', true, :ok, :dtype, :conf, :ms, '미완료')
+                RETURNING 결과_ID
+            """), {
+                "iid": image_id, "pid": meta["process_id"], "ok": not is_defect_flag,
+                "dtype": top1, "conf": conf, "ms": random.randint(900, 1500),
+            })).first()
+
+            await db.execute(text("""
+                UPDATE 검사_세션 SET 총_이미지_수 = 총_이미지_수 + 1,
+                                  양품_수 = 양품_수 + :p,
+                                  불량_수 = 불량_수 + :d
+                WHERE 세션_ID = :sid
+            """), {"sid": meta["session_id"], "p": 0 if is_defect_flag else 1, "d": 1 if is_defect_flag else 0})
+
+            results.append({
+                "client_request_id": meta["client_request_id"],
+                "status": "success",
+                "image_id": image_id,
+                "server_result": {"result_id": res_row[0], "defect_type": top1, "confidence": conf,
+                                  "inference_ms": random.randint(900, 1500), "needs_human_review": False},
+            })
+        except Exception as e:
+            results.append({"client_request_id": meta["client_request_id"], "status": "failed",
+                            "error_code": "INFERENCE_ERROR", "error_message": str(e)})
+
+    await db.commit()
+    success_count = sum(1 for r in results if r["status"] == "success")
+    return {
+        "batch_size": len(metas),
+        "succeeded_count": success_count,
+        "failed_count": len(metas) - success_count,
+        "results": results,
+    }
