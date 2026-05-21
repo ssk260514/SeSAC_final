@@ -12,3 +12,4 @@ Write-Host "감지된 IP: $ip"
 Write-Host "API URL: $apiUrl"
 Set-Location "$PSScriptRoot\inspection_app"
 flutter run $defineArg
+

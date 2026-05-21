@@ -61,7 +61,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     final sid = ref.read(currentSessionIdProvider);
     final pid = ref.read(currentProcessIdProvider);
     final tankLoc = ref.read(selectedTankLocationProvider);
-    if (sid == null || pid == null || tankLoc.tankType == null || tankLoc.sector == null || tankLoc.subsector == null) {
+    if (sid == null || pid == null || tankLoc.tankType == null) {
       _showError('세션 정보가 없습니다. 대시보드로 돌아가 검사 시작을 다시 눌러주세요.');
       return;
     }
@@ -80,8 +80,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           sessionId: sid,
           processId: pid,
           tankType: tankLoc.tankType!,
-          sector: tankLoc.sector!,
-          subsector: tankLoc.subsector!,
         );
         container.read(completedCapturesProvider.notifier).update((s) => s + 1);
       } catch (e) {
