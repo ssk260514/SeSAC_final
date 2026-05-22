@@ -54,13 +54,13 @@ class TfliteInferenceService {
 
     final decoded = img.decodeImage(await imageFile.readAsBytes());
     if (decoded == null) throw Exception('이미지 디코딩 실패');
-    final resized = img.copyResize(decoded, width: 224, height: 224);
+    final resized = img.copyResize(decoded, width: 384, height: 384);
 
     // Float32List로 입력 버퍼 구성 — TFLite가 직접 읽는 typed buffer
-    final inputBuffer = Float32List(224 * 224 * 3);
+    final inputBuffer = Float32List(384 * 384 * 3);
     int idx = 0;
-    for (int y = 0; y < 224; y++) {
-      for (int x = 0; x < 224; x++) {
+    for (int y = 0; y < 384; y++) {
+      for (int x = 0; x < 384; x++) {
         final p = resized.getPixel(x, y);
         inputBuffer[idx++] = (p.r.toDouble() / 255.0 - 0.485) / 0.229;
         inputBuffer[idx++] = (p.g.toDouble() / 255.0 - 0.456) / 0.224;
@@ -71,7 +71,7 @@ class TfliteInferenceService {
     // List.generate로 출력 버퍼 구성 — TFLite가 outputList[0]에 직접 씀
     final outputList = List.generate(1, (_) => List.filled(_labels.length, 0.0));
     _interpreter!.run(
-      inputBuffer.reshape([1, 224, 224, 3]),
+      inputBuffer.reshape([1, 384, 384, 3]),
       outputList,
     );
     final probs = (outputList[0] as List).cast<double>();

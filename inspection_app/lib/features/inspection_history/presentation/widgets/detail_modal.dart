@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -99,18 +100,22 @@ class _DetailModalState extends ConsumerState<DetailModal> {
           AspectRatio(
             aspectRatio: 4 / 3,
             child: Container(
+              clipBehavior: Clip.hardEdge,
               decoration: BoxDecoration(
                 color: AppColors.surfaceVariant,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Stack(
                 children: [
-                  Center(
-                    child: Text(
-                      _gradcamOn ? 'Grad-CAM 오버레이\n(14번 단계에서 진짜 이미지로)' : '원본 이미지\n(14번 단계에서 진짜 이미지로)',
-                      textAlign: TextAlign.center,
-                      style: AppTextStyles.bodyMd.copyWith(color: AppColors.onSurfaceVariant),
-                    ),
+                  CachedNetworkImage(
+                    imageUrl: _gradcamOn && (image['gradcam_url'] != null)
+                        ? image['gradcam_url']
+                        : image['image_url'],
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                    height: double.infinity,
+                    placeholder: (_, __) => const Center(child: CircularProgressIndicator()),
+                    errorWidget: (_, __, ___) => const Center(child: Icon(Icons.broken_image)),
                   ),
                   Positioned(
                     right: 8, top: 8,
@@ -176,7 +181,6 @@ class _DetailModalState extends ConsumerState<DetailModal> {
                           dense: true,
                           leading: const Icon(Icons.description, size: 18),
                           title: Text('${mm['title']} - p.${mm['page']}', style: AppTextStyles.bodyMd),
-                          trailing: Text('${((mm['similarity'] ?? 0) * 100).toStringAsFixed(1)}%', style: AppTextStyles.codeData),
                         );
                       }).toList(),
                     ),
