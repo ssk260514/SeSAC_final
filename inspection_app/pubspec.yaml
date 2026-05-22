@@ -20,6 +20,7 @@ dependencies:
 
   # 네트워크
   dio: ^5.7.0
+  tflite_flutter: ^0.12.0
 
   # 저장소
   flutter_secure_storage: ^9.2.2
