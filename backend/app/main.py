@@ -1,5 +1,7 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from app.core.db import engine
 
@@ -20,6 +22,24 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def preload_models():
+    import asyncio
+    loop = asyncio.get_event_loop()
+    try:
+        from app.services.classifier import get_classifier
+        await loop.run_in_executor(None, get_classifier)
+        print("[startup] 분류기 로드 완료")
+    except Exception as e:
+        print(f"[startup] 분류기 로드 실패: {e}")
+    try:
+        from app.services.manual_search import get_embedder
+        await loop.run_in_executor(None, get_embedder)
+        print("[startup] 임베더 로드 완료")
+    except Exception as e:
+        print(f"[startup] 임베더 로드 실패: {e}")
+
+
 @app.get("/api/health")
 async def health_check():
     """헬스 체크. DB 연결까지 검증."""
@@ -28,6 +48,9 @@ async def health_check():
         result.scalar_one()
     return {"status": "ok", "db": "ok"}
 
+
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 from app.api import auth, tank, session, inspect, result
 

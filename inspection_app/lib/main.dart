@@ -7,6 +7,7 @@ import 'core/storage/token_storage.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/domain/entities/inspector.dart';
 import 'features/auth/presentation/providers/auth_providers.dart';
+import 'features/capture/presentation/providers/capture_providers.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,11 +40,22 @@ void main() async {
   );
 }
 
-class InspectionApp extends ConsumerWidget {
+class InspectionApp extends ConsumerStatefulWidget {
   const InspectionApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<InspectionApp> createState() => _InspectionAppState();
+}
+
+class _InspectionAppState extends ConsumerState<InspectionApp> {
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(() => ref.read(offlineSyncProvider).start());
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final router = ref.watch(appRouterProvider);
     return MaterialApp.router(
       title: 'LNG Inspection',
