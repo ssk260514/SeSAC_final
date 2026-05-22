@@ -34,7 +34,10 @@ class OfflineSyncService {
     final form = FormData();
     final metadata = <Map<String, dynamic>>[];
     for (final it in items) {
-      form.files.add(MapEntry('images', await MultipartFile.fromFile(it.imagePath, filename: '${it.clientRequestId}.jpg')));
+      form.files.add(MapEntry(
+        'images',
+        await MultipartFile.fromFile(it.imagePath, filename: '${it.clientRequestId}.jpg'),
+      ));
       metadata.add({
         'client_request_id': it.clientRequestId,
         'session_id': it.sessionId,
@@ -42,12 +45,18 @@ class OfflineSyncService {
         'tank_type': it.tankType,
         'captured_at': it.capturedAt.toIso8601String(),
         'on_device_result': jsonDecode(it.onDeviceJson),
+        if (it.sector != null) 'sector': it.sector,
+        if (it.subsector != null) 'subsector': it.subsector,
       });
     }
     form.fields.add(MapEntry('metadata', jsonEncode(metadata)));
 
     try {
-      final res = await dio.post('/inspect/offline-batch', data: form, options: Options(contentType: 'multipart/form-data'));
+      final res = await dio.post(
+        '/inspect/offline-batch',
+        data: form,
+        options: Options(contentType: 'multipart/form-data'),
+      );
       final results = (res.data['results'] as List).cast<Map<String, dynamic>>();
       var success = 0;
       for (final r in results) {

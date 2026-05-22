@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
+from app.core.config import settings
 from app.core.db import get_db
 from app.api.deps import get_current_inspector_id
 
@@ -14,21 +15,22 @@ router = APIRouter()
 
 # 단일 통합 모델의 클래스 30개 (불량 19 + 양품 11) — 시드 데이터(`모델_레지스트리.클래스_라벨`)와 동일 순서
 _CLASSES = [
-    # 표면처리 (0~12)
-    "균열-도장", "균열-보온재", "도장흐름-도장", "도막떨어짐-도장", "도막분리-도장",
-    "스크래치-모재", "스크래치-도장", "스크래치-보온재", "보온재손상-보온재", "탱크클리닝불량-모재",
-    "표면양품-모재", "표면양품-도장", "표면양품-보온재",
-    # 용접 (13~15)
+    # 용접 (0~2)
     "용접불량-조인트", "용접블로우홀-조인트", "용접양품-조인트",
-    # 절단 (16~19)
+    # 절단 (3~6)
     "절단불량-모재", "절단불량-보온재", "절단양품-모재", "절단양품-보온재",
-    # 케이블 (20~25)
-    "케이블설치불량-케이블그랜드", "케이블손상-케이블", "바인딩불량-케이블타이",
-    "케이블설치양품-케이블그랜드", "케이블양품-케이블", "바인딩양품-케이블타이",
-    # 파이프 (26~27)
+    # 케이블 (7~12)
+    "바인딩불량-케이블타이", "바인딩양품-케이블타이",
+    "케이블설치불량-케이블그랜드", "케이블설치양품-케이블그랜드",
+    "케이블손상-케이블", "케이블양품-케이블",
+    # 파이프 (13~14)
     "볼트체결불량-파이프", "볼트체결양품-파이프",
-    # 폼스프레이 (28~29)
+    # 폼스프레이 (15~16)
     "폼스프레이불량-우레탄폼", "폼스프레이양품-우레탄폼",
+    # 표면처리 (17~29)
+    "균열-도장", "균열-보온재", "도막떨어짐-도장", "도막분리-도장", "도장흐름-도장",
+    "보온재손상-보온재", "스크래치-도장", "스크래치-모재", "스크래치-보온재", "탱크클리닝불량-모재",
+    "표면양품-도장", "표면양품-모재", "표면양품-보온재",
 ]
 
 
@@ -51,18 +53,54 @@ async def inspect(
     # 1) 이미지 읽기
     image_bytes = await image.read()
 
-    # 2) PyTorch 분류
-    from app.services.classifier import get_classifier, _CLASSES as _CLF_CLASSES
-    clf_result = get_classifier().predict(image_bytes)
-    top1_class = clf_result["defect_type"]
-    top1_idx = _CLF_CLASSES.index(top1_class)
-    confidence = clf_result["confidence"]
-    is_defect_flag = clf_result["is_defect"]
+    # 2) PyTorch 분류 (모델 파일 없거나 로드 실패 시 on_device_result 폴백)
+    clf_result = None
+    top1_class = None
+    top1_idx = 0
+    confidence = 0.0
+    is_defect_flag = True
+    try:
+        from app.services.classifier import get_classifier, _CLASSES as _CLF_CLASSES
+        clf_result = get_classifier().predict(image_bytes)
+        top1_class = clf_result["defect_type"]
+        top1_idx = _CLF_CLASSES.index(top1_class)
+        confidence = clf_result["confidence"]
+        is_defect_flag = clf_result["is_defect"]
+    except Exception as clf_err:
+        print(f"[WARN] 서버 분류기 실패: {clf_err}")
+        # on_device_result가 있으면 단말 결과를 서버 결과 대신 사용
+        if on_device_result:
+            try:
+                dev = json.loads(on_device_result)
+                top1_class = dev.get("defect_type", "미분류")
+                confidence = float(dev.get("confidence", 0.0))
+                is_defect_flag = "양품" not in top1_class
+                clf_result = {
+                    "defect_type": top1_class,
+                    "confidence": confidence,
+                    "top3": dev.get("top3_predictions", [{"class": top1_class, "confidence": confidence}]),
+                    "is_defect": is_defect_flag,
+                }
+                top1_idx = _CLASSES.index(top1_class) if top1_class in _CLASSES else 0
+            except Exception:
+                top1_class = "미분류"
+        else:
+            top1_class = "미분류"
+        clf_result = clf_result or {
+            "defect_type": top1_class,
+            "confidence": confidence,
+            "top3": [{"class": top1_class, "confidence": confidence}],
+            "is_defect": is_defect_flag,
+        }
 
-    # 3) Grad-CAM (항상 생성)
-    from app.services.gradcam import generate_heatmap
-    local = generate_heatmap(image_bytes, target_class=top1_idx)
-    heatmap_url = local.replace("local://", "http://172.16.210.34:8000/")
+    # 3) Grad-CAM (실패해도 진행)
+    heatmap_url = None
+    try:
+        from app.services.gradcam import generate_heatmap
+        local_hm = generate_heatmap(image_bytes, target_class=top1_idx)
+        heatmap_url = local_hm.replace("local://", settings.SERVER_BASE_URL + "/")
+    except Exception as cam_err:
+        print(f"[WARN] Grad-CAM 실패: {cam_err}")
 
     # 4) 이미지 저장 (로컬)
     os.makedirs("uploads/images", exist_ok=True)
@@ -70,7 +108,7 @@ async def inspect(
     img_path = f"uploads/images/{file_uuid}.jpg"
     with open(img_path, "wb") as f:
         f.write(image_bytes)
-    image_url = f"http://172.16.210.34:8000/{img_path}"
+    image_url = f"{settings.SERVER_BASE_URL}/{img_path}"
 
     # 5) 검사_이미지 INSERT
     img_row = (await db.execute(text("""
@@ -106,7 +144,7 @@ async def inspect(
                 VALUES (:iid, :pid, '단말', false, :ok, :dtype, :conf, CAST(:top3 AS JSONB), :ms, '미완료')
             """), {
                 "iid": image_id, "pid": process_id,
-                "ok": "양품" not in dev["defect_type"],
+                "ok": "양품" in dev["defect_type"],
                 "dtype": dev["defect_type"], "conf": dev["confidence"],
                 "top3": json.dumps(dev.get("top3_predictions", [])),
                 "ms": dev.get("inference_ms", 0),
@@ -122,50 +160,53 @@ async def inspect(
         WHERE 세션_ID = :sid
     """), {"sid": session_id, "p": 0 if is_defect_flag else 1, "d": 1 if is_defect_flag else 0})
 
-    # 6) RAG: 불량인 경우 매뉴얼 검색 + LLM 조치 가이드
+    # 6) RAG: 양품·불량 모두 매뉴얼 검색 + LLM 조치 가이드
     action_data = None
-    if is_defect_flag:
+    manuals = []
+    try:
         from app.services.manual_search import search_manuals
-        from app.services.llm import generate_action_guide
-
-        print(f"[RAG] 불량 감지: {top1_class}, process_id={process_id}")
+        print(f"[RAG] 분류 결과: {top1_class}, process_id={process_id}")
         manuals = await search_manuals(db, top1_class, process_id, top_k=3)
         print(f"[RAG] 매뉴얼 검색 결과: {len(manuals)}건")
-        if manuals:
-            try:
-                print("[RAG] LLM 호출 시작")
-                guide = await generate_action_guide(top1_class, manuals)
-                print(f"[RAG] LLM 응답: {guide}")
-                rec_row = (await db.execute(text("""
-                    INSERT INTO 조치_권고 (결과_ID, 조치_요약, 조치_상세, 생성_일시, 수정_일시)
-                    VALUES (:rid, :sum, :det, NOW(), NOW())
-                    RETURNING 권고_ID
-                """), {"rid": server_result_id, "sum": guide["summary"], "det": guide["detail"]})).first()
-                rec_id = rec_row[0]
+    except Exception as rag_err:
+        print(f"[WARN] 매뉴얼 검색 실패: {rag_err}")
 
-                for i, m in enumerate(manuals):
-                    await db.execute(text("""
-                        INSERT INTO 조치_권고_매뉴얼 (권고_ID, 매뉴얼_ID, 순위, 유사도_점수)
-                        VALUES (:r, :m, :rank, :sim)
-                    """), {"r": rec_id, "m": m["manual_id"], "rank": i+1, "sim": m["similarity"]})
+    if manuals:
+        try:
+            from app.services.llm import generate_action_guide
+            print("[RAG] LLM 호출 시작")
+            guide = await generate_action_guide(top1_class, manuals)
+            print(f"[RAG] LLM 응답: {guide}")
+            rec_row = (await db.execute(text("""
+                INSERT INTO 조치_권고 (결과_ID, 조치_요약, 조치_상세, 생성_일시, 수정_일시)
+                VALUES (:rid, :sum, :det, NOW(), NOW())
+                RETURNING 권고_ID
+            """), {"rid": server_result_id, "sum": guide["summary"], "det": guide["detail"]})).first()
+            rec_id = rec_row[0]
 
-                action_data = {
-                    "recommendation_id": rec_id,
-                    "summary": guide["summary"],
-                    "detail": guide["detail"],
-                    "source_manuals": [
-                        {"manual_id": m["manual_id"], "title": m["title"], "page": m["page"],
-                         "chunk_order": m["chunk_order"], "rank": i+1, "similarity": m["similarity"]}
-                        for i, m in enumerate(manuals)
-                    ],
-                }
-            except Exception as e:
-                action_data = {
-                    "recommendation_id": None,
-                    "summary": f"RAG 실패: {e}",
-                    "detail": "매뉴얼 검색 또는 LLM 호출에 실패했습니다.",
-                    "source_manuals": [],
-                }
+            for i, m in enumerate(manuals):
+                await db.execute(text("""
+                    INSERT INTO 조치_권고_매뉴얼 (권고_ID, 매뉴얼_ID, 순위, 유사도_점수)
+                    VALUES (:r, :m, :rank, :sim)
+                """), {"r": rec_id, "m": m["manual_id"], "rank": i+1, "sim": m["similarity"]})
+
+            action_data = {
+                "recommendation_id": rec_id,
+                "summary": guide["summary"],
+                "detail": guide["detail"],
+                "source_manuals": [
+                    {"manual_id": m["manual_id"], "title": m["title"], "page": m["page"],
+                     "chunk_order": m["chunk_order"], "rank": i+1, "similarity": m["similarity"]}
+                    for i, m in enumerate(manuals)
+                ],
+            }
+        except Exception as e:
+            action_data = {
+                "recommendation_id": None,
+                "summary": f"RAG 실패: {e}",
+                "detail": "매뉴얼 검색 또는 LLM 호출에 실패했습니다.",
+                "source_manuals": [],
+            }
 
     await db.commit()
 
@@ -182,7 +223,7 @@ async def inspect(
         "heatmap_url": heatmap_url,
         "action_guide": action_data or {
             "recommendation_id": None,
-            "summary": "양품 — 조치 불필요",
+            "summary": "조치 가이드를 생성하지 못했습니다.",
             "detail": "",
             "source_manuals": [],
         },

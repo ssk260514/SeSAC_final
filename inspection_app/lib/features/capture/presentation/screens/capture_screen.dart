@@ -80,6 +80,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           sessionId: sid,
           processId: pid,
           tankType: tankLoc.tankType!,
+          sector: tankLoc.sector,
+          subsector: tankLoc.subsector,
         );
         container.read(completedCapturesProvider.notifier).update((s) => s + 1);
       } catch (e) {

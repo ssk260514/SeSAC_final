@@ -16,6 +16,8 @@ class _FakeTokenStorage extends Fake implements TokenStorage {
     required String accessToken,
     required String refreshToken,
     required int inspectorId,
+    required String inspectorName,
+    String? inspectorDepartment,
   }) async {}
   @override
   Future<void> clear() async {}

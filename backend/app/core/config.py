@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     SERVER_RECHECK_THRESHOLD: float = 0.70      # 서버 사람_재확인_필요 분기 임계값
 
     OPENAI_API_KEY: str = ""
+    SERVER_BASE_URL: str = "http://localhost:8000"  # .env에서 실제 기기 IP로 오버라이드 필요
 
 
 settings = Settings()

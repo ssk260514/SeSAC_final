@@ -38,5 +38,7 @@ def generate_heatmap(image_bytes: bytes, target_class: int, save_dir: str = "upl
     return f"local://{out_path}"   # MVP: 로컬 경로. 운영은 S3 URL.
 
 
-def to_public_url(local_path: str, base_url: str = "http://10.0.2.2:8000") -> str:
+def to_public_url(local_path: str, base_url: str = "") -> str:
+    from app.core.config import settings
+    base_url = base_url or settings.SERVER_BASE_URL
     return local_path.replace("local://", f"{base_url}/")

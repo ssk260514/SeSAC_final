@@ -11,9 +11,7 @@ import '../datasources/capture_remote_data_source.dart';
 import '../local/offline_queue.dart';
 import '../local/tflite_inference_service.dart';
 
-
 const double _kPassThreshold = 0.85;
-
 
 class CaptureRepositoryImpl implements CaptureRepository {
   final CaptureRemoteDataSource remote;
@@ -34,8 +32,10 @@ class CaptureRepositoryImpl implements CaptureRepository {
     required int sessionId,
     required int processId,
     required String tankType,
+    String? sector,
+    String? subsector,
   }) async {
-    // 1) 단말 1차 추론 (TFLite 모델 없으면 서버 직행)
+    // 1) 단말 1차 추론
     TfliteInferenceResult? local;
     try {
       local = await tflite.infer(imageFile);
@@ -50,6 +50,8 @@ class CaptureRepositoryImpl implements CaptureRepository {
           'session_id': sessionId,
           'process_id': processId,
           'tank_type': tankType,
+          if (sector != null) 'sector': sector,
+          if (subsector != null) 'subsector': subsector,
           'defect_type': local.defectType,
           'confidence': local.confidence,
           'top3_predictions': local.top3.map((e) => {'class': e.label, 'confidence': e.confidence}).toList(),
@@ -59,7 +61,8 @@ class CaptureRepositoryImpl implements CaptureRepository {
         });
       } catch (_) {}
       return CaptureResult(
-        imageId: -1, resultId: -1,
+        imageId: -1,
+        resultId: -1,
         defectType: local.defectType,
         confidence: local.confidence,
         isDefect: false,
@@ -71,7 +74,7 @@ class CaptureRepositoryImpl implements CaptureRepository {
     final connectivity = await Connectivity().checkConnectivity();
     final isOnline = connectivity.any((r) => r != ConnectivityResult.none);
 
-    final onDeviceJson = local == null ? null : jsonEncode({
+    final String? onDeviceJson = local == null ? null : jsonEncode({
       'defect_type': local.defectType,
       'confidence': local.confidence,
       'inference_ms': local.inferenceMs,
@@ -85,6 +88,8 @@ class CaptureRepositoryImpl implements CaptureRepository {
         processId: processId,
         tankType: tankType,
         onDeviceJson: onDeviceJson ?? '',
+        sector: sector,
+        subsector: subsector,
       );
       throw const QueuedOfflineFailure();
     }
@@ -96,16 +101,23 @@ class CaptureRepositoryImpl implements CaptureRepository {
         processId: processId,
         tankType: tankType,
         onDeviceJson: onDeviceJson ?? '',
+        sector: sector,
+        subsector: subsector,
       );
       return dto.toEntity();
     } on DioException catch (e) {
-      if (e.type == DioExceptionType.connectionError || e.type == DioExceptionType.connectionTimeout) {
+      if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout) {
         await queue.enqueue(
           imageFile: imageFile,
           sessionId: sessionId,
           processId: processId,
           tankType: tankType,
           onDeviceJson: onDeviceJson ?? '',
+          sector: sector,
+          subsector: subsector,
         );
         throw const QueuedOfflineFailure();
       }

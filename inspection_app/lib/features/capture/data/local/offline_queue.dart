@@ -11,6 +11,8 @@ class OfflineQueueItem {
   final int processId;
   final String tankType;
   final String onDeviceJson;
+  final String? sector;
+  final String? subsector;
   final DateTime capturedAt;
 
   const OfflineQueueItem({
@@ -20,6 +22,8 @@ class OfflineQueueItem {
     required this.processId,
     required this.tankType,
     required this.onDeviceJson,
+    this.sector,
+    this.subsector,
     required this.capturedAt,
   });
 }
@@ -35,7 +39,7 @@ class OfflineQueueDb {
     final path = p.join(docs.path, 'offline_queue.db');
     _db = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE pending_uploads (
@@ -45,9 +49,17 @@ class OfflineQueueDb {
             process_id INTEGER NOT NULL,
             tank_type TEXT NOT NULL,
             on_device_json TEXT NOT NULL,
+            sector TEXT,
+            subsector TEXT,
             captured_at TEXT NOT NULL
           )
         ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('ALTER TABLE pending_uploads ADD COLUMN sector TEXT');
+          await db.execute('ALTER TABLE pending_uploads ADD COLUMN subsector TEXT');
+        }
       },
     );
     return _db!;
@@ -59,6 +71,8 @@ class OfflineQueueDb {
     required int processId,
     required String tankType,
     required String onDeviceJson,
+    String? sector,
+    String? subsector,
   }) async {
     final docs = await getApplicationDocumentsDirectory();
     final queueDir = Directory(p.join(docs.path, 'queue_images'));
@@ -76,6 +90,8 @@ class OfflineQueueDb {
       'process_id': processId,
       'tank_type': tankType,
       'on_device_json': onDeviceJson,
+      if (sector != null) 'sector': sector,
+      if (subsector != null) 'subsector': subsector,
       'captured_at': DateTime.now().toIso8601String(),
     });
     return clientId;
@@ -91,6 +107,8 @@ class OfflineQueueDb {
           processId: r['process_id'] as int,
           tankType: r['tank_type'] as String,
           onDeviceJson: r['on_device_json'] as String,
+          sector: r['sector'] as String?,
+          subsector: r['subsector'] as String?,
           capturedAt: DateTime.parse(r['captured_at'] as String),
         )).toList();
   }

@@ -1,9 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../data/datasources/capture_remote_data_source.dart';
+import '../../data/local/tflite_inference_service.dart';
 import '../../data/local/offline_queue.dart';
 import '../../data/local/offline_sync_service.dart';
-import '../../data/local/tflite_inference_service.dart';
 import '../../data/repositories/capture_repository_impl.dart';
 import '../../domain/repositories/capture_repository.dart';
 

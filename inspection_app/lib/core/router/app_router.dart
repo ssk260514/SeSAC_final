@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/storage/token_storage.dart';
 import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/auth/presentation/screens/auth_screen.dart';
 import '../../features/tank_location/presentation/screens/tank_location_screen.dart';
@@ -30,16 +29,15 @@ class AppRoutes {
 }
 
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final tokenStorage = ref.watch(tokenStorageProvider);
   final notifier = _RouterNotifier(ref);
 
   return GoRouter(
     initialLocation: AppRoutes.login,
     debugLogDiagnostics: true,
     refreshListenable: notifier,
-    redirect: (context, state) async {
-      final token = await tokenStorage.getAccessToken();
-      final isAuthed = token != null;
+    redirect: (context, state) {
+      final inspector = ref.read(currentInspectorProvider);
+      final isAuthed = inspector != null;
       final goingToLogin = state.matchedLocation == AppRoutes.login;
 
       if (!isAuthed && !goingToLogin) return AppRoutes.login;

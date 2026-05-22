@@ -8,26 +8,32 @@ class CaptureRemoteDataSource {
   final Dio dio;
   CaptureRemoteDataSource(this.dio);
 
-  Future<InspectResponseDto> uploadAndInspect({
+  Future<InspectResponseDto> uploadAndInspectWithDevice({
     required File imageFile,
     required int sessionId,
     required int processId,
     required String tankType,
-    required String sector,
-    required String subsector,
+    required String onDeviceJson,
+    String? sector,
+    String? subsector,
   }) async {
     final form = FormData.fromMap({
       'image': await MultipartFile.fromFile(imageFile.path, filename: 'capture.jpg'),
       'session_id': sessionId,
       'process_id': processId,
       'tank_type': tankType,
-      'sector': sector,
-      'subsector': subsector,
+      'on_device_result': onDeviceJson,
+      if (sector != null) 'sector': sector,
+      if (subsector != null) 'subsector': subsector,
     });
     final res = await dio.post(
       '/inspect',
       data: form,
-      options: Options(contentType: 'multipart/form-data'),
+      options: Options(
+        contentType: 'multipart/form-data',
+        receiveTimeout: const Duration(seconds: 120),
+        sendTimeout: const Duration(seconds: 30),
+      ),
     );
     return InspectResponseDto.fromJson(res.data as Map<String, dynamic>);
   }

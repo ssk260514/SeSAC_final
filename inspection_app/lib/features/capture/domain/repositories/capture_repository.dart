@@ -8,5 +8,7 @@ abstract class CaptureRepository {
     required int sessionId,
     required int processId,
     required String tankType,
+    String? sector,
+    String? subsector,
   });
 }
