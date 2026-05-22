@@ -135,7 +135,7 @@ async def get_image_detail(
         "server_result": _row_to_dict(server, gradcam=True),
         "action_guide": action or {
             "recommendation_id": None,
-            "summary": "[MVP 더미] 14번 단계에서 RAG로 생성됩니다.",
+            "summary": "양품 — 조치 불필요",
             "detail": "",
             "source_manuals": [],
         },

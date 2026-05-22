@@ -35,11 +35,16 @@ class CaptureRepositoryImpl implements CaptureRepository {
     required int processId,
     required String tankType,
   }) async {
-    // 1) 단말 1차 추론
-    final local = await tflite.infer(imageFile);
+    // 1) 단말 1차 추론 (TFLite 모델 없으면 서버 직행)
+    TfliteInferenceResult? local;
+    try {
+      local = await tflite.infer(imageFile);
+    } catch (_) {
+      local = null;
+    }
 
     // 2) 양품 + 신뢰도 충분 → 서버 호출 없음, /api/inspect/local-result만
-    if (local.isPass && local.confidence >= _kPassThreshold) {
+    if (local != null && local.isPass && local.confidence >= _kPassThreshold) {
       try {
         await dio.post('/inspect/local-result', data: {
           'session_id': sessionId,
@@ -66,7 +71,7 @@ class CaptureRepositoryImpl implements CaptureRepository {
     final connectivity = await Connectivity().checkConnectivity();
     final isOnline = connectivity.any((r) => r != ConnectivityResult.none);
 
-    final onDeviceJson = jsonEncode({
+    final onDeviceJson = local == null ? null : jsonEncode({
       'defect_type': local.defectType,
       'confidence': local.confidence,
       'inference_ms': local.inferenceMs,
@@ -79,7 +84,7 @@ class CaptureRepositoryImpl implements CaptureRepository {
         sessionId: sessionId,
         processId: processId,
         tankType: tankType,
-        onDeviceJson: onDeviceJson,
+        onDeviceJson: onDeviceJson ?? '',
       );
       throw const QueuedOfflineFailure();
     }
@@ -90,7 +95,7 @@ class CaptureRepositoryImpl implements CaptureRepository {
         sessionId: sessionId,
         processId: processId,
         tankType: tankType,
-        onDeviceJson: onDeviceJson,
+        onDeviceJson: onDeviceJson ?? '',
       );
       return dto.toEntity();
     } on DioException catch (e) {
@@ -100,7 +105,7 @@ class CaptureRepositoryImpl implements CaptureRepository {
           sessionId: sessionId,
           processId: processId,
           tankType: tankType,
-          onDeviceJson: onDeviceJson,
+          onDeviceJson: onDeviceJson ?? '',
         );
         throw const QueuedOfflineFailure();
       }

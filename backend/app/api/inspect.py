@@ -1,6 +1,7 @@
+import json
+import os
 import random
 import uuid
-from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -43,75 +44,77 @@ async def inspect(
     tank_type: str = Form(...),
     sector: str | None = Form(default=None),
     subsector: str | None = Form(default=None),
-    on_device_result: str | None = Form(default=None),   # JSON 문자열 (옵션)
+    on_device_result: str | None = Form(default=None),
     inspector_id: int = Depends(get_current_inspector_id),
     db: AsyncSession = Depends(get_db),
 ):
-    # 1) 이미지 저장 (MVP: 로컬 디스크. 14번에서 S3로)
+    # 1) 이미지 읽기
+    image_bytes = await image.read()
+
+    # 2) PyTorch 분류
+    from app.services.classifier import get_classifier, _CLASSES as _CLF_CLASSES
+    clf_result = get_classifier().predict(image_bytes)
+    top1_class = clf_result["defect_type"]
+    top1_idx = _CLF_CLASSES.index(top1_class)
+    confidence = clf_result["confidence"]
+    is_defect_flag = clf_result["is_defect"]
+
+    # 3) Grad-CAM (항상 생성)
+    from app.services.gradcam import generate_heatmap
+    local = generate_heatmap(image_bytes, target_class=top1_idx)
+    heatmap_url = local.replace("local://", "http://172.16.210.34:8000/")
+
+    # 4) 이미지 저장 (로컬)
+    os.makedirs("uploads/images", exist_ok=True)
     file_uuid = uuid.uuid4().hex
-    local_path = f"local://uploads/{file_uuid}.jpg"
-    # 실제 디스크 저장은 14번에서 보강. 지금은 경로 메타만 기록.
+    img_path = f"uploads/images/{file_uuid}.jpg"
+    with open(img_path, "wb") as f:
+        f.write(image_bytes)
+    image_url = f"http://172.16.210.34:8000/{img_path}"
 
-    # 2) 더미 분류 (랜덤)
-    # 30클래스 가중치: 불량 19개=1, 양품 11개=3 (양품 비중 ↑로 실제 분포 시뮬)
-    _WEIGHTS = [3 if "양품" in c else 1 for c in _CLASSES]
-    top1 = random.choices(_CLASSES, weights=_WEIGHTS)[0]
-    conf = round(random.uniform(0.55, 0.99), 3)
-    top3 = [{"class": top1, "confidence": conf}]
-    for c in random.sample([x for x in _CLASSES if x != top1], 2):
-        top3.append({"class": c, "confidence": round(random.uniform(0.01, 0.30), 3)})
-    is_defect_flag = _is_defect(top1)
-
-    # 3) 검사_이미지 INSERT
+    # 5) 검사_이미지 INSERT
     img_row = (await db.execute(text("""
         INSERT INTO 검사_이미지 (세션_ID, 이미지_경로, 촬영_일시)
-        VALUES (:sid, :path, NOW())
-        RETURNING 이미지_ID
-    """), {"sid": session_id, "path": local_path})).first()
+        VALUES (:sid, :path, NOW()) RETURNING 이미지_ID
+    """), {"sid": session_id, "path": image_url})).first()
     image_id = img_row[0]
 
-    # 4-a) 단말 결과 INSERT (on_device_result가 있을 때)
-    if on_device_result:
-        import json as _json
-        dev = _json.loads(on_device_result)
-        await db.execute(text("""
-            INSERT INTO 검사_결과 (
-                이미지_ID, 공정_ID, 추론_위치, 대표_여부, 품질_여부,
-                결함_유형, 신뢰도_점수, 상위_예측, 추론_지연_ms,
-                사람_재확인_필요, 결과_처리_상태
-            ) VALUES (
-                :iid, :pid, '단말', false, :ok,
-                :dtype, :conf, CAST(:top3 AS JSONB), :ms,
-                false, '완료'
-            )
-        """), {
-            "iid": image_id, "pid": process_id,
-            "ok": "양품" in dev.get("defect_type", ""),
-            "dtype": dev.get("defect_type", ""),
-            "conf": dev.get("confidence", 0),
-            "top3": _json.dumps(dev.get("top3_predictions", [])),
-            "ms": dev.get("inference_ms", 0),
-        })
-
-    # 4-b) 검사_결과 INSERT (서버 결과, 대표=true)
-    res_row = (await db.execute(text("""
-        INSERT INTO 검사_결과 (
-            이미지_ID, 공정_ID, 추론_위치, 대표_여부, 품질_여부,
+    # 서버 결과 INSERT
+    server_res = (await db.execute(text("""
+        INSERT INTO 검사_결과 (이미지_ID, 공정_ID, 추론_위치, 대표_여부, 품질_여부,
             결함_유형, 신뢰도_점수, 상위_예측, 추론_지연_ms,
-            사람_재확인_필요, 결과_처리_상태
-        ) VALUES (
-            :iid, :pid, '서버', true, :ok,
-            :dtype, :conf, CAST(:top3 AS JSONB), :ms,
-            :review, '미완료'
-        ) RETURNING 결과_ID
+            사람_재확인_필요, "Grad-CAM_경로", 결과_처리_상태)
+        VALUES (:iid, :pid, '서버', true, :ok, :dtype, :conf, CAST(:top3 AS JSONB), :ms,
+                :review, :gradcam, '미완료')
+        RETURNING 결과_ID
     """), {
         "iid": image_id, "pid": process_id, "ok": not is_defect_flag,
-        "dtype": top1, "conf": conf, "top3": __import__("json").dumps(top3),
-        "ms": random.randint(900, 1500), "review": conf < 0.70,
+        "dtype": top1_class, "conf": confidence,
+        "top3": json.dumps(clf_result["top3"]),
+        "ms": 1200, "review": confidence < 0.70,
+        "gradcam": heatmap_url,
     })).first()
-    result_id = res_row[0]
+    server_result_id = server_res[0]
 
-    # 5) 세션 카운터 UPDATE
+    # 단말 결과 동봉 시 row 추가 (대표=false)
+    if on_device_result:
+        try:
+            dev = json.loads(on_device_result)
+            await db.execute(text("""
+                INSERT INTO 검사_결과 (이미지_ID, 공정_ID, 추론_위치, 대표_여부, 품질_여부,
+                    결함_유형, 신뢰도_점수, 상위_예측, 추론_지연_ms, 결과_처리_상태)
+                VALUES (:iid, :pid, '단말', false, :ok, :dtype, :conf, CAST(:top3 AS JSONB), :ms, '미완료')
+            """), {
+                "iid": image_id, "pid": process_id,
+                "ok": "양품" not in dev["defect_type"],
+                "dtype": dev["defect_type"], "conf": dev["confidence"],
+                "top3": json.dumps(dev.get("top3_predictions", [])),
+                "ms": dev.get("inference_ms", 0),
+            })
+        except Exception:
+            pass
+
+    # 세션 카운터
     await db.execute(text("""
         UPDATE 검사_세션 SET 총_이미지_수 = 총_이미지_수 + 1,
                           양품_수 = 양품_수 + :p,
@@ -119,22 +122,68 @@ async def inspect(
         WHERE 세션_ID = :sid
     """), {"sid": session_id, "p": 0 if is_defect_flag else 1, "d": 1 if is_defect_flag else 0})
 
+    # 6) RAG: 불량인 경우 매뉴얼 검색 + LLM 조치 가이드
+    action_data = None
+    if is_defect_flag:
+        from app.services.manual_search import search_manuals
+        from app.services.llm import generate_action_guide
+
+        print(f"[RAG] 불량 감지: {top1_class}, process_id={process_id}")
+        manuals = await search_manuals(db, top1_class, process_id, top_k=3)
+        print(f"[RAG] 매뉴얼 검색 결과: {len(manuals)}건")
+        if manuals:
+            try:
+                print("[RAG] LLM 호출 시작")
+                guide = await generate_action_guide(top1_class, manuals)
+                print(f"[RAG] LLM 응답: {guide}")
+                rec_row = (await db.execute(text("""
+                    INSERT INTO 조치_권고 (결과_ID, 조치_요약, 조치_상세, 생성_일시, 수정_일시)
+                    VALUES (:rid, :sum, :det, NOW(), NOW())
+                    RETURNING 권고_ID
+                """), {"rid": server_result_id, "sum": guide["summary"], "det": guide["detail"]})).first()
+                rec_id = rec_row[0]
+
+                for i, m in enumerate(manuals):
+                    await db.execute(text("""
+                        INSERT INTO 조치_권고_매뉴얼 (권고_ID, 매뉴얼_ID, 순위, 유사도_점수)
+                        VALUES (:r, :m, :rank, :sim)
+                    """), {"r": rec_id, "m": m["manual_id"], "rank": i+1, "sim": m["similarity"]})
+
+                action_data = {
+                    "recommendation_id": rec_id,
+                    "summary": guide["summary"],
+                    "detail": guide["detail"],
+                    "source_manuals": [
+                        {"manual_id": m["manual_id"], "title": m["title"], "page": m["page"],
+                         "chunk_order": m["chunk_order"], "rank": i+1, "similarity": m["similarity"]}
+                        for i, m in enumerate(manuals)
+                    ],
+                }
+            except Exception as e:
+                action_data = {
+                    "recommendation_id": None,
+                    "summary": f"RAG 실패: {e}",
+                    "detail": "매뉴얼 검색 또는 LLM 호출에 실패했습니다.",
+                    "source_manuals": [],
+                }
+
     await db.commit()
 
     return {
         "image_id": image_id,
         "server_result": {
-            "result_id": result_id,
-            "defect_type": top1,
-            "confidence": conf,
-            "inference_ms": random.randint(900, 1500),
-            "needs_human_review": conf < 0.70,
+            "result_id": server_result_id,
+            "defect_type": top1_class,
+            "confidence": confidence,
+            "inference_ms": 1200,
+            "needs_human_review": confidence < 0.70,
+            "top3_predictions": clf_result["top3"],
         },
-        "heatmap_url": None,    # 14번에서 채움
-        "action_guide": {
+        "heatmap_url": heatmap_url,
+        "action_guide": action_data or {
             "recommendation_id": None,
-            "summary": "[MVP 더미] 분석 가이드는 14번 단계에서 RAG로 생성됩니다.",
-            "detail": "현재는 더미 응답입니다.",
+            "summary": "양품 — 조치 불필요",
+            "detail": "",
             "source_manuals": [],
         },
     }

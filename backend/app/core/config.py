@@ -19,5 +19,7 @@ class Settings(BaseSettings):
     GLOBAL_CONFIDENCE_THRESHOLD: float = 0.85   # 단말 양품 자동 종결 컷오프
     SERVER_RECHECK_THRESHOLD: float = 0.70      # 서버 사람_재확인_필요 분기 임계값
 
+    OPENAI_API_KEY: str = ""
+
 
 settings = Settings()

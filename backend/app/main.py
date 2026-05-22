@@ -1,5 +1,7 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from app.core.db import engine
 
@@ -28,6 +30,9 @@ async def health_check():
         result.scalar_one()
     return {"status": "ok", "db": "ok"}
 
+
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 from app.api import auth, tank, session, inspect, result
 
