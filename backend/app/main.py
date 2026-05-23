@@ -52,10 +52,11 @@ async def health_check():
 os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-from app.api import auth, tank, session, inspect, result
+from app.api import auth, tank, session, inspect, result, settings
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(tank.router, prefix="/api", tags=["tank"])
 app.include_router(session.router, prefix="/api", tags=["session"])
 app.include_router(inspect.router, prefix="/api", tags=["inspect"])
 app.include_router(result.router, prefix="/api", tags=["result"])
+app.include_router(settings.router, prefix="/api", tags=["settings"])
