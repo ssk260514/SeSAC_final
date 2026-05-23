@@ -137,7 +137,8 @@ class InspectionHistoryScreen extends ConsumerWidget {
   }
 
   void _onCardTap(BuildContext context, ResultCard card) {
-    if (card.resultStatus == '미완료') {
+    // 미완료이거나, 완료지만 서버 분석 없는 양품(단말 전용) → 모달 먼저
+    if (card.resultStatus == '미완료' || !card.hasServerResult) {
       showModalBottomSheet(
         context: context,
         isScrollControlled: true,
@@ -145,7 +146,7 @@ class InspectionHistoryScreen extends ConsumerWidget {
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
         builder: (_) => DetailModal(imageId: card.imageId),
       );
-    } else if (card.resultStatus == '완료') {
+    } else {
       context.go('${AppRoutes.result}?imageId=${card.imageId}');
     }
   }

@@ -73,10 +73,12 @@ class _ResultReviewBodyState extends ConsumerState<_ResultReviewBody> {
   void _initFromState(ResultReviewState state) {
     if (_initialized || state.raw == null) return;
     final server = state.raw!['server_result'] as Map<String, dynamic>?;
+    final device = state.raw!['device_result'] as Map<String, dynamic>?;
+    final effective = server ?? device; // 양품(단말 전용)은 device_result로 fallback
     final action = state.raw!['action_guide'] as Map<String, dynamic>?;
     final feedback = state.raw!['feedback'] as Map<String, dynamic>?;
 
-    _defectType = feedback?['modified_defect_type']?.toString() ?? server?['defect_type']?.toString();
+    _defectType = feedback?['modified_defect_type']?.toString() ?? effective?['defect_type']?.toString();
     _severity = feedback?['severity']?.toString();
     _actionDetailCtrl.text = feedback?['final_action_content']?.toString() ?? action?['detail']?.toString() ?? '';
     _opinionCtrl.text = feedback?['opinion']?.toString() ?? '';
@@ -91,6 +93,8 @@ class _ResultReviewBodyState extends ConsumerState<_ResultReviewBody> {
     if (!state.isLoading) _initFromState(state);
 
     final server = state.raw?['server_result'] as Map<String, dynamic>?;
+    final device = state.raw?['device_result'] as Map<String, dynamic>?;
+    final effective = server ?? device; // 양품(단말 전용)은 device_result로 fallback
     final action = state.raw?['action_guide'] as Map<String, dynamic>?;
     final feedback = state.raw?['feedback'] as Map<String, dynamic>?;
     final isEdit = state.isEditMode;
@@ -151,9 +155,9 @@ class _ResultReviewBodyState extends ConsumerState<_ResultReviewBody> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('AI 판정: ${server?['defect_type'] ?? '-'}', style: AppTextStyles.h3),
+                              Text('AI 판정: ${effective?['defect_type'] ?? '-'}', style: AppTextStyles.h3),
                               const SizedBox(height: 4),
-                              Text('신뢰도: ${((server?['confidence'] ?? 0) * 100).toStringAsFixed(1)}%',
+                              Text('신뢰도: ${((effective?['confidence'] ?? 0) * 100).toStringAsFixed(1)}%',
                                   style: AppTextStyles.codeData),
                             ],
                           ),
