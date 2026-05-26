@@ -8,9 +8,11 @@ import 'core/theme/app_theme.dart';
 import 'features/auth/domain/entities/inspector.dart';
 import 'features/auth/presentation/providers/auth_providers.dart';
 import 'features/capture/presentation/providers/capture_providers.dart';
+import 'features/capture/data/local/model_ota_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 모델 OTA는 S3 presigned URL로 전환됨 — Firebase 초기화 불필요.
 
   // 앱 시작 전 SecureStorage에서 inspector 복구 시도
   const storage = FlutterSecureStorage(
@@ -48,16 +50,31 @@ class InspectionApp extends ConsumerStatefulWidget {
 }
 
 class _InspectionAppState extends ConsumerState<InspectionApp> {
+  final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
   @override
   void initState() {
     super.initState();
-    Future.microtask(() => ref.read(offlineSyncProvider).start());
+    Future.microtask(() async {
+      ref.read(offlineSyncProvider).start();
+      try {
+        final updated = await ref.read(modelOtaServiceProvider).checkAndDownload();
+        if (updated && mounted) {
+          _scaffoldMessengerKey.currentState?.showSnackBar(
+            const SnackBar(content: Text('새 AI 모델이 준비되었습니다. 다음 앱 시작 시 적용됩니다.')),
+          );
+        }
+      } catch (_) {
+        // 모델 OTA 실패는 앱 동작에 영향 없음 — 기존 모델 유지 (안전 우선)
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final router = ref.watch(appRouterProvider);
     return MaterialApp.router(
+      scaffoldMessengerKey: _scaffoldMessengerKey,
       title: 'LNG Inspection',
       theme: AppTheme.light(),
       routerConfig: router,

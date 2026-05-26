@@ -1,10 +1,5 @@
 -- ============================================
--- 1. pgvector 확장 활성화
--- ============================================
-CREATE EXTENSION IF NOT EXISTS vector;
-
--- ============================================
--- 2. ENUM 타입
+-- 1. ENUM 타입
 -- ============================================
 CREATE TYPE 모델_유형_ENUM AS ENUM ('TFLITE', 'PTH');
 CREATE TYPE 세션_상태_ENUM AS ENUM ('진행중', '완료');
@@ -141,15 +136,17 @@ CREATE TABLE 검사_피드백 (
 );
 
 -- ============================================
--- 6. RAG 테이블
+-- 6. 매뉴얼 테이블 (결함유형 직접 룩업)
 -- ============================================
 
 CREATE TABLE 매뉴얼 (
     매뉴얼_ID          SERIAL PRIMARY KEY,
     공정_ID            INT NOT NULL REFERENCES 공정(공정_ID),
+    결함_유형          VARCHAR(100) NOT NULL,
     제목               VARCHAR(200) NOT NULL,
     내용               TEXT NOT NULL,
-    내용_벡터          VECTOR(1024),
+    조치_요약          VARCHAR(500),
+    조치_상세          TEXT,
     출처               VARCHAR(200),
     페이지_번호        INT,
     청크_순서          INT,
@@ -157,7 +154,7 @@ CREATE TABLE 매뉴얼 (
 );
 
 CREATE INDEX idx_manual_process ON 매뉴얼(공정_ID);
--- 벡터 검색 인덱스 (행 100개 이상 들어간 후 만들기 권장 → 14번 단계에서 추가)
+CREATE INDEX idx_manual_defect_type ON 매뉴얼(공정_ID, 결함_유형);
 
 CREATE TABLE 조치_권고 (
     권고_ID            SERIAL PRIMARY KEY,
@@ -173,7 +170,7 @@ CREATE TABLE 조치_권고_매뉴얼 (
     권고_ID            INT NOT NULL REFERENCES 조치_권고(권고_ID) ON DELETE CASCADE,
     매뉴얼_ID          INT NOT NULL REFERENCES 매뉴얼(매뉴얼_ID),
     순위               INT NOT NULL CHECK (순위 BETWEEN 1 AND 3),
-    유사도_점수        FLOAT NOT NULL,
+    유사도_점수        FLOAT NOT NULL DEFAULT 1.0,
     생성_일시          TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE(권고_ID, 순위),
     UNIQUE(권고_ID, 매뉴얼_ID)

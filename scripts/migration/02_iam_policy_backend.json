@@ -1,0 +1,30 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "WriteInspectionSamples",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": "arn:aws:s3:::lng-inspection-samples/*"
+    },
+    {
+      "Sid": "ReadModelsForPresign",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": "arn:aws:s3:::lng-inspection-models/*"
+    },
+    {
+      "Sid": "ReadDocsOptional",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": "arn:aws:s3:::lng-inspection-docs/*"
+    }
+  ]
+}

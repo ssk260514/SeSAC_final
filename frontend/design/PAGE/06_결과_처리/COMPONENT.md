@@ -24,7 +24,7 @@
 | 본문 상단 | 검사 요약 카드 | Card (Row) | 썸네일(20×20) + "AI 판정: [결함유형]" + "신뢰도: [%]" |
 | 본문 | 결함 유형 판정 | Card | 라벨 "결함 유형 판정 (Defect Type)" + DropdownButton |
 | 본문 | 심각도 판정 | Card 내 | 라벨 "심각도 판정 (Severity Level)" + DropdownButton (경미/보통/심각) |
-| 본문 | RAG 조치 가이드 | Card (primary tint) | smart_toy 아이콘 + "RAG 생성 조치 가이드" + 조치 요약 (읽기 전용) |
+| 본문 | 조치 가이드 카드 | Card (primary tint) | smart_toy 아이콘 + "매뉴얼 기반 조치 가이드" + 조치 요약 (읽기 전용) |
 | 본문 | 조치 내용 수정 | TextField (multiline) | 라벨 "조치 내용 수정" + 초기값 = 조치_상세. 편집모드에서만 수정 가능 |
 | 본문 | 의견/메모 | TextField (multiline) | 라벨 "의견/메모" + 자유 형식 입력. 편집모드에서만 수정 가능 |
 | 하단 플로팅 | "수정" 버튼 | OutlinedButton (flex-1) | 편집모드 활성화 |
@@ -32,7 +32,7 @@
 | 하단 | Bottom Navigation Bar | BottomNav | 4탭 (결과 처리 활성) |
 
 ### 2.2 Widget 트리 (개요)
-> TODO: `ResultReviewScreen` / `DefectTypeDropdown` / `SeverityDropdown` / `RAGGuideCard` / `ActionEditField` / `FeedbackField` 분해
+> TODO: `ResultReviewScreen` / `DefectTypeDropdown` / `SeverityDropdown` / `ActionGuideCard` / `ActionEditField` / `FeedbackField` 분해
 
 ### 2.3 State & Provider
 > TODO: `ResultReviewState` (편집모드 플래그, 결함_유형, 심각도, 조치_내용, 의견 등), `ResultReviewNotifier`
@@ -62,7 +62,7 @@
 |---|---|---|---|
 | READ | 검사_결과 | 품질_여부, 결함_유형, 신뢰도_점수, 상위_예측 | 검사 요약 카드 (AI 판정 결함 유형 + 신뢰도 표시) |
 | READ | 모델_레지스트리 | 클래스_라벨 (30개 JSONB) | 결함 유형 드롭다운 선택지 — 통합 30클래스 (공정별 그룹 헤더·검색 UX 권장) |
-| READ | 조치_권고 | 조치_요약, 조치_상세 | RAG 가이드 표시 + 조치 내용 초기값 |
+| READ | 조치_권고 | 조치_요약, 조치_상세 | 매뉴얼 기반 조치 가이드 표시 + 조치 내용 초기값 |
 | INSERT | 검사_피드백 | 결과_ID, 검사원_ID, 세션_ID, 검사원_수정_여부, 수정된_결함_유형, 심각도, 의견, 최종_조치_내용 | 최초 저장 (행 존재 = 확정 — N-13 보정으로 저장_상태 컬럼 제거됨) |
 | UPDATE | 검사_피드백 | 수정된_결함_유형, 심각도, 최종_조치_내용, 검사원_수정_여부, 수정_일시 | 기존 결과 수정 |
 | UPDATE | 검사_결과 | 결과_처리_상태='완료' | 저장 시 완료 처리 |
@@ -96,7 +96,7 @@
     ▼
 "결과 처리" 버튼 클릭 → 결과 처리 [탭3]
     │  (결함 유형은 AI 판정값으로 초기 설정, 심각도는 검사원 직접 선택 — 디폴트 미선택)
-    │  (조치 내용은 RAG 자동 생성 내용으로 초기 설정)
+    │  (조치 내용은 매뉴얼 사전 작성 텍스트로 초기 설정)
     ▼
 결함 유형/심각도/조치 내용 확인 → "저장" 클릭
     │

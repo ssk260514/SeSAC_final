@@ -29,7 +29,7 @@
 | 에러 응답 형식 | `{"error": "ERROR_CODE", "message": "..."}` (기능 명세서 기준) |
 | 액세스 토큰 유효기간 | 30분 |
 | 리프레시 토큰 유효기간 | 7일 |
-| BGE-M3 임베딩 차원 | 1024 (dense, `VECTOR(1024)`) |
+| 매뉴얼 조회 방식 | 결함 유형 기반 직접 SELECT (`매뉴얼.공정_ID + 결함_유형` 인덱스) — 임베딩·벡터 검색·LLM 미사용 |
 
 ---
 
@@ -47,7 +47,7 @@
 | GET | `/api/sessions` | SESS-002 | 세션 이력 목록 조회 | ✅ |
 | PATCH | `/api/sessions/{id}/end` | SESS-003 | 세션 종료 | ✅ |
 | GET | `/api/dashboard/summary` | SESS-004 | 대시보드 요약 조회 | ✅ |
-| POST | `/api/inspect` | INFER-002 | 서버 정밀 분석 (분류+Grad-CAM+RAG) | ✅ |
+| POST | `/api/inspect` | INFER-002 | 서버 정밀 분석 (분류+Grad-CAM+매뉴얼 직접 조회) | ✅ |
 | POST | `/api/inspect/local-result` | INFER-003 | 양품 단말 결과 기록 | ✅ |
 | POST | `/api/inspect/sample-upload` | INFER-004 | 양품 10% 샘플 업로드 | ✅ |
 | POST | `/api/inspect/offline-batch` | INFER-005 | 오프라인 큐 배치 업로드 (멱등성, 3주차) | ✅ |
@@ -240,7 +240,7 @@ Dio Interceptor가 401 응답 감지 → 자동으로 `/api/auth/refresh` 호출
     "process_id": 1,
     "process_name": "표면처리",
     "confidence_threshold": 0.85,
-    "defect_types": ["균열-도장", "균열-보온재", "박리-도장", "스크래치-도장", "스크래치-보온재", "표면양품-도장", "표면양품-보온재"]
+    "defect_types": ["균열-도장", "균열-보온재", "도막떨어짐-도장", "도막분리-도장", "도장흐름-도장", "보온재손상-보온재", "스크래치-도장", "스크래치-모재", "스크래치-보온재", "탱크클리닝불량-모재", "표면양품-도장", "표면양품-모재", "표면양품-보온재"]
   }
 }
 ```
@@ -268,7 +268,7 @@ Dio Interceptor가 401 응답 감지 → 자동으로 `/api/auth/refresh` 호출
   {
     "process_id": 1,
     "process_name": "표면처리",
-    "defect_types": ["균열-도장", "균열-보온재", "박리-도장"],
+    "defect_types": ["균열-도장", "균열-보온재", "도막떨어짐-도장", "도막분리-도장", "도장흐름-도장", "보온재손상-보온재", "스크래치-도장", "스크래치-모재", "스크래치-보온재", "탱크클리닝불량-모재", "표면양품-도장", "표면양품-모재", "표면양품-보온재"],
     "confidence_threshold": 0.85,
     "is_active": true,
     "has_tflite_model": true
@@ -276,7 +276,7 @@ Dio Interceptor가 401 응답 감지 → 자동으로 `/api/auth/refresh` 호출
   {
     "process_id": 2,
     "process_name": "용접",
-    "defect_types": ["기공", "언더컷", "슬래그혼입"],
+    "defect_types": ["용접불량-조인트", "용접블로우홀-조인트", "용접양품-조인트"],
     "confidence_threshold": 0.85,
     "is_active": false,
     "has_tflite_model": false
@@ -315,7 +315,7 @@ Dio Interceptor가 401 응답 감지 → 자동으로 `/api/auth/refresh` 호출
 }
 ```
 
-> `process_id`는 서버가 `tank_type`에서 자동 매핑. `selected_subsector`는 화면 2 2단계 드롭다운에서 선택한 세부 위치. `process_id`는 위치 기록·RAG 매뉴얼 범위 한정용 메타이며, 모델은 단일이므로 모델 선택과 무관.
+> `process_id`는 서버가 `tank_type`에서 자동 매핑. `selected_subsector`는 화면 2 2단계 드롭다운에서 선택한 세부 위치. `process_id`는 위치 기록·매뉴얼 범위 한정용 메타이며, 모델은 단일이므로 모델 선택과 무관.
 
 **처리 로직**
 1. 당일 해당 검사원의 기존 진행 중 세션 확인 → 존재하면 `409 DAILY_SESSION_EXISTS` 반환 (body에 `existing_session_id` 포함)
@@ -504,8 +504,8 @@ on_device_result: {
   "inference_ms": 180,
   "top3_predictions": [
     {"class": "균열-도장", "confidence": 0.78},
-    {"class": "박리-도장", "confidence": 0.12},
-    {"class": "스크래치-도장", "confidence": 0.04}
+    {"class": "스크래치-도장", "confidence": 0.12},
+    {"class": "도막떨어짐-도장", "confidence": 0.04}
   ]
 }
 ```
@@ -513,28 +513,30 @@ on_device_result: {
 **서버 처리 흐름**
 ```
 1. JWT 인증 확인
-2. 이미지 전처리 (224×224, ImageNet 정규화)
-3. MobileNetV3(.pth) 재추론
-   ├─ 신뢰도 < 공정.서버_재확인_임계값 (기본 0.70) → 사람_재확인_필요=true
-   └─ 신뢰도 ≥ 공정.서버_재확인_임계값                → 정상 분류
-4. Grad-CAM 히트맵 생성 → S3 업로드
-5. RAG 파이프라인:
-   a. 결함 유형 텍스트 → BGE-M3 임베딩 (dense 1024차원)
-   b. pgvector 코사인 유사도 Top-3 검색
-   c. Qwen 2.5 7B AWQ + vLLM 조치 가이드 생성
+2. 이미지 전처리 (384×384, ImageNet 정규화)
+3. MobileNetV3(.pth, 단일 통합 30클래스) 재추론
+   ├─ 신뢰도 < SERVER_RECHECK_THRESHOLD (전역 0.70 — config.py) → 사람_재확인_필요=true
+   └─ 신뢰도 ≥ SERVER_RECHECK_THRESHOLD                          → 정상 분류
+4. Grad-CAM 히트맵 생성 → uploads/heatmaps/*.png 저장 (운영 단계 S3 마이그레이션)
+5. 매뉴얼 직접 조회 (LLM·임베딩·벡터 검색 없음):
+   a. SELECT 매뉴얼_ID, 제목, 내용, 조치_요약, 조치_상세, 출처, 페이지_번호, 청크_순서
+      FROM 매뉴얼 WHERE 공정_ID=:pid AND 결함_유형=:defect_type
+      ORDER BY 청크_순서 LIMIT 3
+   b. 결과 0행이면 WHERE 공정_ID=:pid 로 폴백
+   c. 매칭 청크의 사전 작성 `조치_요약`(≤500자)·`조치_상세`(단계별)를 그대로 사용
 6. 결과 통합 JSON 응답
 7. BackgroundTasks 비동기 저장:
-   - 원본 이미지 → S3
+   - 원본 이미지 → uploads/images/*.jpg (운영 단계 S3 마이그레이션)
    - 검사_이미지 INSERT (탱크_타입 컬럼 없음 — 세션 JOIN으로 조회)
-   - 검사_결과 INSERT × 2 (단말: 대표_여부=false / 서버: 대표_여부=true)
+   - 검사_결과 INSERT × 1~2 (서버 항상: 대표_여부=true / 단말 동봉 시 추가: 대표_여부=false)
      · 결함_유형 VARCHAR NOT NULL 직접 컬럼에 최종 클래스 저장
      · 상위_예측 JSONB에 Top-3 동시 저장
-   - 조치_권고 INSERT + 조치_권고_매뉴얼 INSERT × 3
+   - 조치_권고 INSERT + 조치_권고_매뉴얼 INSERT × 1~3
      · UNIQUE (권고_ID, 순위), UNIQUE (권고_ID, 매뉴얼_ID) 제약 적용
    - 검사_세션 카운터 UPDATE (총_이미지_수 / 양품_수 / 불량_수)
 ```
 
-> `공정.서버_재확인_임계값`은 전역 단일값(0.70). 모든 공정 행 동일. INFER-002는 DB에서 조회하되 공정별 차등 없음 (하드코딩 금지).
+> `SERVER_RECHECK_THRESHOLD`(서버 재확인 임계값)는 전역 단일값 0.70. 코드는 `config.py`의 본 설정을 우선 참조하며, `공정.서버_재확인_임계값` 컬럼은 유지하되 모든 행이 동일 값. INFER-002는 공정별 차등 없음.
 
 **응답 (Response) 200**
 ```json
@@ -559,15 +561,15 @@ on_device_result: {
     "summary": "도장 균열 부위 재도장 필요",
     "detail": "1) 균열 부위 주변 50mm 범위를 사포(#180)로 연마\n2) 프라이머 도포 후 24시간 건조\n3) 상도 2회 도장",
     "source_manuals": [
-      {"manual_id": 23, "title": "표면처리 정비 지침서", "page": 45, "chunk_order": 3, "rank": 1, "similarity": 0.91},
-      {"manual_id": 24, "title": "표면처리 정비 지침서", "page": 47, "chunk_order": 5, "rank": 2, "similarity": 0.85},
-      {"manual_id": 25, "title": "표면처리 정비 지침서", "page": 48, "chunk_order": 6, "rank": 3, "similarity": 0.78}
+      {"manual_id": 23, "title": "표면처리 정비 지침서", "page": 45, "chunk_order": 3, "rank": 1, "similarity": 1.0},
+      {"manual_id": 24, "title": "표면처리 정비 지침서", "page": 47, "chunk_order": 5, "rank": 2, "similarity": 1.0},
+      {"manual_id": 25, "title": "표면처리 정비 지침서", "page": 48, "chunk_order": 6, "rank": 3, "similarity": 1.0}
     ]
   }
 }
 ```
 
-> `source_manuals`: RAG Top-3 청크 메타데이터 배열. `rank`=sLLM 입력 순서, `similarity`=pgvector 코사인 유사도.
+> `source_manuals`: 결함 유형 직접 조회로 매칭된 청크 메타데이터 배열. `rank`=`청크_순서` ASC 순서(1=가장 작은 청크), `similarity`=직접 조회이므로 기본 `1.0` (필드는 호환성 유지 목적으로 응답에 포함).
 
 **ERD 연동**
 | 작업 | 테이블 | 컬럼 |
@@ -575,8 +577,8 @@ on_device_result: {
 | WRITE | `검사_이미지` | INSERT (세션_ID, 이미지_경로=S3 URL, 촬영_일시) — **탱크_타입 컬럼 없음** (세션 JOIN으로 조회) |
 | WRITE | `검사_결과` | INSERT × 2 (이미지_ID, 공정_ID, 모델_ID, 추론_위치, 대표_여부, 품질_여부, **결함_유형**, 신뢰도_점수, 상위_예측, 추론_지연_ms, 사람_재확인_필요, Grad-CAM_경로, 결과_처리_상태='미완료') |
 | WRITE | `조치_권고` | INSERT (결과_ID, 조치_요약, 조치_상세) — **매뉴얼_ID FK 없음** (조치_권고_매뉴얼로 이관) |
-| WRITE | `조치_권고_매뉴얼` | INSERT × 3 (권고_ID, 매뉴얼_ID, 순위 1~3, 유사도_점수, 생성_일시) |
-| READ | `매뉴얼` | 내용_벡터 `VECTOR(1024)` pgvector 코사인 유사도 검색 |
+| WRITE | `조치_권고_매뉴얼` | INSERT × 1~3 (권고_ID, 매뉴얼_ID, 순위 1~3, 유사도_점수=1.0, 생성_일시) |
+| READ | `매뉴얼` | `WHERE 공정_ID=? AND 결함_유형=?` 직접 조회 (`idx_manual_defect_type`). 미매칭 시 `WHERE 공정_ID=?` 폴백 — `조치_요약`/`조치_상세`/`출처`/`페이지_번호`/`청크_순서` 추출 |
 | READ | `공정` | 신뢰도_임계값 (단말 컷오프), **서버_재확인_임계값** (사람_재확인_필요 분기) — 전역 단일값 (공정별 차등 없음) |
 | UPDATE | `검사_세션` | 총_이미지_수 += 1, 양품_수/불량_수 += 1 (품질_여부 기준) |
 
@@ -671,7 +673,7 @@ metadata:  JSON 배열 (images[]와 동일 순서)
       "inference_ms": 180,
       "top3_predictions": [
         {"class": "균열-도장", "confidence": 0.78},
-        {"class": "박리-도장", "confidence": 0.12},
+        {"class": "스크래치-도장", "confidence": 0.12},
         {"class": "스크래치-도장", "confidence": 0.04}
       ]
     }
@@ -733,7 +735,7 @@ metadata:  JSON 배열 (images[]와 동일 순서)
 {
   "model_id": 7,
   "version": "v2",
-  "file_url": "https://firebaseml.googleapis.com/...",
+  "download_url": "https://lng-inspection-models.s3.ap-northeast-2.amazonaws.com/best_model_v5_datamatch_full.tflite?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=600&...",
   "file_hash": "sha256:abc123...",
   "class_labels": {
     "0": "용접불량-조인트",
@@ -889,7 +891,7 @@ metadata:  JSON 배열 (images[]와 동일 순서)
     "needs_human_review": false,
     "top3_predictions": [
       {"class": "균열-도장", "confidence": 0.923},
-      {"class": "박리-도장", "confidence": 0.054},
+      {"class": "도막떨어짐-도장", "confidence": 0.054},
       {"class": "스크래치-도장", "confidence": 0.023}
     ]
   },
@@ -975,7 +977,7 @@ metadata:  JSON 배열 (images[]와 동일 순서)
 | API | `PATCH /api/recommendations/{recommendation_id}` |
 | 인증 | ✅ |
 | 화면 | 화면 6 |
-| 설명 | RAG 자동 생성 조치 가이드를 검사원이 직접 수정 |
+| 설명 | 매뉴얼에서 채택된 조치 가이드를 검사원이 현장 상황에 맞게 수정 |
 
 **요청 (Request)**
 ```json
@@ -1093,11 +1095,11 @@ metadata:  JSON 배열 (images[]와 동일 순서)
 | AUTH-003 (logout) | ✅ (audit 로그만) | | | | 토큰 블랙리스트(Redis)는 Post-MVP |
 | ZONE-001 / ZONE-002 / PROC-001 | ✅ | | | | |
 | SESS-001 ~ SESS-004 | ✅ | | | | 1일 1세션 partial UNIQUE index 적용 |
-| INFER-002 (서버 정밀 분석) | ✅ | | | | 1주차는 키워드 검색, 2주차 진짜 RAG로 교체 |
+| INFER-002 (서버 정밀 분석) | ✅ | | | | 1주차는 키워드 검색, 2주차 매뉴얼 직접 조회(`조치_요약`/`조치_상세` 사전 작성)로 교체 |
 | INFER-003 (단말 양품 결과) | ❌ | ✅ | | | 1주차는 단말 추론 없음 — 모든 사진 서버 전송 |
 | INFER-004 (양품 10% 샘플) | ❌ | | ✅ | | S3 비동기 업로드 |
 | INFER-005 (오프라인 배치) | ❌ | | ✅ | | `client_request_id` 멱등성 키 |
-| OTA-001 (모델 버전) | ❌ | | ✅ | | Firebase ML 연동 |
+| OTA-001 (모델 버전) | ❌ | | ✅ | | S3 presigned URL 발급 (3차 변경: Firebase ML 제거, `tutorial/21`) |
 | OTA-002 (모델 활성화) | ❌ | | ✅ | | `X-Admin-API-Key`, 단일 활성 모델 트랜잭션 |
 | RESULT-001 / RESULT-002 | ✅ | | | | `thumbnail_url`은 MVP 원본 URL과 동일 (Post-MVP CloudFront Resizing) |
 | FEEDBACK-001 ~ FEEDBACK-003 | ✅ | | | | upsert (`결과_ID` UNIQUE) |
@@ -1127,5 +1129,5 @@ metadata:  JSON 배열 (images[]와 동일 순서)
 | 404 | NOT_FOUND | 리소스 없음 |
 | 409 | DAILY_SESSION_EXISTS | 당일 진행중 세션 존재 (1일 1세션 규칙) |
 | 500 | INFERENCE_ERROR | 서버 추론 실패 |
-| 500 | RAG_ERROR | RAG 파이프라인 실패 |
+| 500 | MANUAL_LOOKUP_ERROR | 매뉴얼 직접 조회 실패 (DB 오류 등) |
 | 503 | GPU_BUSY | GPU 큐 초과 |

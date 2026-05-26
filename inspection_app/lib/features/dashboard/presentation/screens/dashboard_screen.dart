@@ -169,10 +169,12 @@ class DashboardScreen extends ConsumerWidget {
                               if (!context.mounted) return;
                               ref.read(currentSessionIdProvider.notifier).state = session.sessionId;
                               ref.read(currentProcessIdProvider.notifier).state = 1;
+                              ref.read(testShotCountProvider.notifier).state = 0; // [테스트 전용] 새 세션 카운트 리셋
                               context.go(AppRoutes.capture);
                             } on DailySessionExistsFailure catch (f) {
                               ref.read(currentSessionIdProvider.notifier).state = f.existingSessionId;
                               ref.read(currentProcessIdProvider.notifier).state = 1;
+                              ref.read(testShotCountProvider.notifier).state = 0; // [테스트 전용] 새 세션 카운트 리셋
                               if (!context.mounted) return;
                               context.go(AppRoutes.capture);
                             } catch (e) {
