@@ -20,6 +20,7 @@ pluginManagement {
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "8.11.1" apply false
+    // Firebase ML 제거됨 — 모델 OTA는 S3 presigned URL 다운로드로 전환.
     id("org.jetbrains.kotlin.android") version "2.2.20" apply false
 }
 

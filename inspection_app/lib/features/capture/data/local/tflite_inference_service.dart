@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
 
+import 'model_ota_service.dart';
+
 class TfliteInferenceResult {
   final String defectType;
   final double confidence;
@@ -23,6 +25,9 @@ class TfliteInferenceResult {
 
 
 class TfliteInferenceService {
+  TfliteInferenceService({this.otaService});
+  final ModelOtaService? otaService;
+
   Interpreter? _interpreter;
 
   static const List<String> _labels = [
@@ -46,7 +51,14 @@ class TfliteInferenceService {
 
   Future<void> init() async {
     if (_interpreter != null) return;
-    _interpreter = await Interpreter.fromAsset('assets/models/best_model_v5_datamatch_full.tflite');
+    final otaPath = await otaService?.resolveActiveModelPath();
+    if (otaPath != null && await File(otaPath).exists()) {
+      _interpreter = Interpreter.fromFile(File(otaPath));
+    } else {
+      _interpreter = await Interpreter.fromAsset(
+        'assets/models/best_model_v5_datamatch_full.tflite',
+      );
+    }
     _interpreter!.allocateTensors();
 
     // 모델 실제 입출력 shape 진단 — 콘솔에서 확인 후 이 블록 제거

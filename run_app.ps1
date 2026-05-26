@@ -1,4 +1,8 @@
-﻿$ip = (Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias "Wi-Fi" -ErrorAction SilentlyContinue).IPAddress
+﻿# Java 환경 설정 (항상 OpenJDK 17 사용 — 불완전한 Android Studio JBR 회피)
+$env:JAVA_HOME = "C:\Program Files\Microsoft\jdk-17.0.19.10-hotspot"
+$env:PATH = "$env:JAVA_HOME\bin;" + $env:PATH
+
+$ip = (Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias "Wi-Fi" -ErrorAction SilentlyContinue).IPAddress
 if (-not $ip) {
     $ip = (Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias "이더넷" -ErrorAction SilentlyContinue).IPAddress
 }

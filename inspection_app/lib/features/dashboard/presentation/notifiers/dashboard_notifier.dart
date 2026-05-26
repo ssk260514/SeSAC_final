@@ -23,11 +23,14 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
   }
 
   Future<void> refresh() async {
+    if (!mounted) return;
     state = state.copyWith(isLoading: true, errorMessage: null);
     try {
       final data = await ref.read(dashboardRepositoryProvider).getSummary();
+      if (!mounted) return; // autoDispose 후 응답이 늦게 도착하면 무시
       state = state.copyWith(isLoading: false, data: data);
     } on Failure catch (f) {
+      if (!mounted) return;
       state = state.copyWith(isLoading: false, errorMessage: f.message);
     }
   }

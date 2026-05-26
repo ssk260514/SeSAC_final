@@ -19,8 +19,17 @@ class Settings(BaseSettings):
     GLOBAL_CONFIDENCE_THRESHOLD: float = 0.85   # 단말 양품 자동 종결 컷오프
     SERVER_RECHECK_THRESHOLD: float = 0.70      # 서버 사람_재확인_필요 분기 임계값
 
-    OPENAI_API_KEY: str = ""
     SERVER_BASE_URL: str = "http://localhost:8000"  # .env에서 실제 기기 IP로 오버라이드 필요
+
+    # S3 양품 샘플 저장
+    S3_BUCKET: str = "lng-inspection-samples"
+    # 모델 전용 버킷 — 샘플/검사 데이터와 IAM 경계 분리 (Firebase ML 분리 계정 대체).
+    # 앱에는 AWS 키를 주지 않고, 백엔드가 발급한 presigned URL로만 다운로드시킨다.
+    S3_MODELS_BUCKET: str = "lng-inspection-models"
+    MODEL_URL_EXPIRES_SEC: int = 600  # presigned URL 만료(초) — 다운로드에 충분하되 짧게
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_REGION: str = "ap-northeast-2"
 
 
 settings = Settings()

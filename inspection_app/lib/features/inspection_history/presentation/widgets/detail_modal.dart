@@ -43,6 +43,9 @@ class _DetailModalState extends ConsumerState<DetailModal> {
   @override
   Widget build(BuildContext context) {
     final screenH = MediaQuery.of(context).size.height;
+    final hasServer = _data?['server_result'] != null;
+    final title = (_data == null || hasServer) ? '정밀 분석 결과' : '단말 자동 종결';
+
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: screenH * 0.9),
       child: Column(
@@ -57,7 +60,7 @@ class _DetailModalState extends ConsumerState<DetailModal> {
             padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
             child: Row(
               children: [
-                Text('정밀 분석 결과', style: AppTextStyles.h1),
+                Text(title, style: AppTextStyles.h1),
                 const Spacer(),
                 IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close)),
               ],
@@ -72,13 +75,18 @@ class _DetailModalState extends ConsumerState<DetailModal> {
           const SizedBox(height: 16),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                context.go('${AppRoutes.result}?imageId=${widget.imageId}');
-              },
-              child: const Text('결과 처리'),
-            ),
+            child: hasServer
+                ? ElevatedButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      context.go('${AppRoutes.result}?imageId=${widget.imageId}');
+                    },
+                    child: const Text('결과 처리'),
+                  )
+                : OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('닫기'),
+                  ),
           ),
         ],
       ),
@@ -88,9 +96,18 @@ class _DetailModalState extends ConsumerState<DetailModal> {
   Widget _content() {
     final image = _data!['image'] as Map<String, dynamic>;
     final server = _data!['server_result'] as Map<String, dynamic>?;
+    final device = _data!['device_result'] as Map<String, dynamic>?;
     final action = _data!['action_guide'] as Map<String, dynamic>?;
 
-    final top3 = (server?['top3_predictions'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    // 서버 분석이 있으면 그걸 우선, 없으면 단말 결과로 폴백 (양품 자동종결 / 오프라인 단말)
+    final primary = server ?? device;
+    final top3 = (primary?['top3_predictions'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final hasServer = server != null;
+
+    // 단말 종결 항목은 이미지 경로가 local://batch, local://device-only, s3:// 등이라 직접 표시 불가
+    final imageUrl = image['image_url']?.toString();
+    final canShowImage = imageUrl != null &&
+        (imageUrl.startsWith('http://') || imageUrl.startsWith('https://'));
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -105,46 +122,62 @@ class _DetailModalState extends ConsumerState<DetailModal> {
                 color: AppColors.surfaceVariant,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Stack(
-                children: [
-                  CachedNetworkImage(
-                    imageUrl: _gradcamOn && (image['gradcam_url'] != null)
-                        ? image['gradcam_url']
-                        : image['image_url'],
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    height: double.infinity,
-                    placeholder: (_, __) => const Center(child: CircularProgressIndicator()),
-                    errorWidget: (_, __, ___) => const Center(child: Icon(Icons.broken_image)),
-                  ),
-                  Positioned(
-                    right: 8, top: 8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(16)),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+              child: canShowImage
+                  ? Stack(
+                      children: [
+                        CachedNetworkImage(
+                          imageUrl: _gradcamOn && (image['gradcam_url'] != null)
+                              ? image['gradcam_url']
+                              : imageUrl,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          height: double.infinity,
+                          placeholder: (_, __) => const Center(child: CircularProgressIndicator()),
+                          errorWidget: (_, __, ___) => const Center(child: Icon(Icons.broken_image)),
+                        ),
+                        Positioned(
+                          right: 8, top: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(16)),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text('Grad-CAM', style: TextStyle(color: Colors.white, fontSize: 12)),
+                                Switch(value: _gradcamOn, onChanged: (v) => setState(() => _gradcamOn = v)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Text('Grad-CAM', style: TextStyle(color: Colors.white, fontSize: 12)),
-                          Switch(value: _gradcamOn, onChanged: (v) => setState(() => _gradcamOn = v)),
+                          const Icon(Icons.devices, size: 36, color: AppColors.onSurfaceVariant),
+                          const SizedBox(height: 8),
+                          Text('단말 종결 항목 — 서버에 이미지 보관 안 됨',
+                              style: AppTextStyles.bodyMd.copyWith(color: AppColors.onSurfaceVariant)),
                         ],
                       ),
                     ),
-                  ),
-                ],
-              ),
             ),
           ),
-          const SizedBox(height: 8),
-          Text('* 이미지를 두 손가락으로 확대(Pinch Zoom)할 수 있습니다.',
-              style: AppTextStyles.caption.copyWith(fontStyle: FontStyle.italic, color: AppColors.onSurfaceVariant)),
+          if (canShowImage) ...[
+            const SizedBox(height: 8),
+            Text('* 이미지를 두 손가락으로 확대(Pinch Zoom)할 수 있습니다.',
+                style: AppTextStyles.caption.copyWith(fontStyle: FontStyle.italic, color: AppColors.onSurfaceVariant)),
+          ],
 
           const SizedBox(height: 16),
-          Text('추론 결과 (Top-3 Predictions)', style: AppTextStyles.h3),
+          Text(hasServer ? '추론 결과 (Top-3 Predictions)' : '단말 추론 결과 (Top-3 Predictions)',
+              style: AppTextStyles.h3),
           const SizedBox(height: 8),
           ...top3.asMap().entries.map((e) => _PredictionBar(rank: e.key + 1, data: e.value)),
 
-          if (action != null) ...[
+          // RAG 조치 가이드는 서버 정밀분석이 있을 때만 의미가 있음
+          if (hasServer && action != null && action['recommendation_id'] != null) ...[
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(12),

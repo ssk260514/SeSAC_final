@@ -12,6 +12,9 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../tank_location/presentation/providers/tank_location_providers.dart';
 import '../providers/capture_providers.dart';
 
+/// [테스트 전용] 실기기 테스트 시 촬영 횟수 제한. 운영 배포 전 제거하거나 null 로 설정.
+const int? kTestCaptureLimit = 10;
+
 class CaptureScreen extends ConsumerStatefulWidget {
   const CaptureScreen({super.key});
 
@@ -57,6 +60,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   Future<void> _shoot() async {
     if (_ctrl == null || !_ctrl!.value.isInitialized || _ctrl!.value.isTakingPicture) return;
 
+    // [테스트 전용] 촬영 횟수 제한 도달 시 차단
+    if (kTestCaptureLimit != null &&
+        ref.read(testShotCountProvider) >= kTestCaptureLimit!) {
+      _showError('테스트 촬영 한도($kTestCaptureLimit장)에 도달했습니다.');
+      return;
+    }
+
     // await 이전에 모든 상태 캡처 — 촬영 중 화면 이탈 시에도 업로드가 진행되도록
     final sid = ref.read(currentSessionIdProvider);
     final pid = ref.read(currentProcessIdProvider);
@@ -70,6 +80,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
     final xfile = await _ctrl!.takePicture();
     final file = File(xfile.path);
+
+    // [테스트 전용] 셔터 누른 횟수 누적 (세션 단위, 한도 도달 시 셔터 비활성화)
+    ref.read(testShotCountProvider.notifier).update((s) => s + 1);
 
     container.read(pendingUploadsProvider.notifier).update((s) => s + 1);
 
@@ -147,6 +160,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     final tankLoc = ref.watch(selectedTankLocationProvider);
     final pending = ref.watch(pendingUploadsProvider);
     final completed = ref.watch(completedCapturesProvider);
+    final shotCount = ref.watch(testShotCountProvider);
+    final limitReached = kTestCaptureLimit != null && shotCount >= kTestCaptureLimit!;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -177,6 +192,20 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                       ),
                     ),
                     const Spacer(),
+                    if (kTestCaptureLimit != null)
+                      Container(
+                        margin: const EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: (limitReached ? AppColors.error : Colors.black)
+                              .withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          '테스트 $shotCount/$kTestCaptureLimit',
+                          style: AppTextStyles.labelBold.copyWith(color: Colors.white),
+                        ),
+                      ),
                     if (pending > 0)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -240,15 +269,17 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                       ),
                     ),
 
-                    // 셔터 버튼
+                    // 셔터 버튼 (테스트 한도 도달 시 비활성화)
                     GestureDetector(
-                      onTap: _shoot,
+                      onTap: limitReached ? null : _shoot,
                       child: Container(
                         width: 80, height: 80,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 4),
-                          color: AppColors.primaryContainer,
+                          color: limitReached
+                              ? Colors.white24
+                              : AppColors.primaryContainer,
                         ),
                       ),
                     ),

@@ -15,6 +15,12 @@ class OfflineQueueItem {
   final String? subsector;
   final DateTime capturedAt;
 
+  /// 'defect'(불량/저신뢰) | 'pass'(양품 고신뢰 — 오프라인 단말 종결분)
+  final String kind;
+
+  /// 양품 10% 재학습 샘플 대상 여부. true 일 때만 imagePath 가 보관되고 복구 시 S3 업로드됨.
+  final bool needsSample;
+
   const OfflineQueueItem({
     required this.clientRequestId,
     required this.imagePath,
@@ -25,6 +31,8 @@ class OfflineQueueItem {
     this.sector,
     this.subsector,
     required this.capturedAt,
+    this.kind = 'defect',
+    this.needsSample = false,
   });
 }
 
@@ -39,7 +47,7 @@ class OfflineQueueDb {
     final path = p.join(docs.path, 'offline_queue.db');
     _db = await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE pending_uploads (
@@ -51,7 +59,9 @@ class OfflineQueueDb {
             on_device_json TEXT NOT NULL,
             sector TEXT,
             subsector TEXT,
-            captured_at TEXT NOT NULL
+            captured_at TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'defect',
+            needs_sample INTEGER NOT NULL DEFAULT 0
           )
         ''');
       },
@@ -59,6 +69,10 @@ class OfflineQueueDb {
         if (oldVersion < 2) {
           await db.execute('ALTER TABLE pending_uploads ADD COLUMN sector TEXT');
           await db.execute('ALTER TABLE pending_uploads ADD COLUMN subsector TEXT');
+        }
+        if (oldVersion < 3) {
+          await db.execute("ALTER TABLE pending_uploads ADD COLUMN kind TEXT NOT NULL DEFAULT 'defect'");
+          await db.execute('ALTER TABLE pending_uploads ADD COLUMN needs_sample INTEGER NOT NULL DEFAULT 0');
         }
       },
     );
@@ -73,19 +87,27 @@ class OfflineQueueDb {
     required String onDeviceJson,
     String? sector,
     String? subsector,
+    String kind = 'defect',
+    bool needsSample = false,
   }) async {
-    final docs = await getApplicationDocumentsDirectory();
-    final queueDir = Directory(p.join(docs.path, 'queue_images'));
-    if (!await queueDir.exists()) await queueDir.create(recursive: true);
-
     final clientId = _uuid.v4();
-    final newPath = p.join(queueDir.path, '$clientId.jpg');
-    await imageFile.copy(newPath);
+
+    // 이미지 보관 정책: 불량/저신뢰는 항상, 양품은 10% 샘플 대상만 보관.
+    // 비샘플링 양품은 메타만 동기화하면 되므로 디스크·통신 절약을 위해 이미지를 두지 않는다.
+    final keepImage = kind != 'pass' || needsSample;
+    String storedPath = '';
+    if (keepImage) {
+      final docs = await getApplicationDocumentsDirectory();
+      final queueDir = Directory(p.join(docs.path, 'queue_images'));
+      if (!await queueDir.exists()) await queueDir.create(recursive: true);
+      storedPath = p.join(queueDir.path, '$clientId.jpg');
+      await imageFile.copy(storedPath);
+    }
 
     final database = await db;
     await database.insert('pending_uploads', {
       'client_request_id': clientId,
-      'image_path': newPath,
+      'image_path': storedPath,
       'session_id': sessionId,
       'process_id': processId,
       'tank_type': tankType,
@@ -93,6 +115,8 @@ class OfflineQueueDb {
       if (sector != null) 'sector': sector,
       if (subsector != null) 'subsector': subsector,
       'captured_at': DateTime.now().toIso8601String(),
+      'kind': kind,
+      'needs_sample': needsSample ? 1 : 0,
     });
     return clientId;
   }
@@ -110,6 +134,8 @@ class OfflineQueueDb {
           sector: r['sector'] as String?,
           subsector: r['subsector'] as String?,
           capturedAt: DateTime.parse(r['captured_at'] as String),
+          kind: (r['kind'] as String?) ?? 'defect',
+          needsSample: ((r['needs_sample'] as int?) ?? 0) == 1,
         )).toList();
   }
 
@@ -122,6 +148,7 @@ class OfflineQueueDb {
   Future<void> remove(String clientRequestId) async {
     final database = await db;
     await database.delete('pending_uploads', where: 'client_request_id = ?', whereArgs: [clientRequestId]);
+    // 비샘플링 양품은 보관 이미지가 없을 수 있음 — exists 체크로 안전 삭제
     final docs = await getApplicationDocumentsDirectory();
     final path = p.join(docs.path, 'queue_images', '$clientRequestId.jpg');
     final f = File(path);

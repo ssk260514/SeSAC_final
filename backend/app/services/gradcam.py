@@ -2,19 +2,11 @@ import io
 import os
 import numpy as np
 import torch
-import torchvision.transforms as T
 from PIL import Image, ImageOps
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image
 
-from .classifier import get_classifier
-
-
-_transform = T.Compose([
-    T.Resize((384, 384)),   # 실제 모델 입력 크기 384×384 (튜토리얼 224×224에서 수정)
-    T.ToTensor(),
-    T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-])
+from .classifier import get_classifier, _transform
 
 
 def generate_heatmap(image_bytes: bytes, target_class: int, save_dir: str = "uploads/heatmaps") -> str:

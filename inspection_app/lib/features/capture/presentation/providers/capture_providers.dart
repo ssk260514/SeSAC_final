@@ -2,13 +2,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../data/datasources/capture_remote_data_source.dart';
 import '../../data/local/tflite_inference_service.dart';
+import '../../data/local/model_ota_service.dart';
 import '../../data/local/offline_queue.dart';
 import '../../data/local/offline_sync_service.dart';
 import '../../data/repositories/capture_repository_impl.dart';
 import '../../domain/repositories/capture_repository.dart';
 
 final tfliteServiceProvider = Provider<TfliteInferenceService>((ref) {
-  final s = TfliteInferenceService();
+  final s = TfliteInferenceService(otaService: ref.watch(modelOtaServiceProvider));
   ref.onDispose(() => s.dispose());
   return s;
 });
@@ -43,6 +44,9 @@ final currentProcessIdProvider = StateProvider<int?>((_) => null);
 /// 백그라운드 업로드 큐 카운터 (UI 표시용)
 final pendingUploadsProvider = StateProvider<int>((_) => 0);
 final completedCapturesProvider = StateProvider<int>((_) => 0);
+
+/// [테스트 전용] 현재 세션에서 셔터를 누른 누적 횟수. 세션 시작 시 0으로 리셋.
+final testShotCountProvider = StateProvider<int>((_) => 0);
 
 /// 업로드 실패 메시지 — 화면 이탈 후 실패해도 이력 화면에서 SnackBar 표시 가능
 final uploadFailureProvider = StateProvider<String?>((_) => null);

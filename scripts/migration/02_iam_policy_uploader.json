@@ -1,0 +1,38 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "UploadModelsAndData",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": [
+        "arn:aws:s3:::lng-inspection-models",
+        "arn:aws:s3:::lng-inspection-models/*",
+        "arn:aws:s3:::lng-inspection-datasets",
+        "arn:aws:s3:::lng-inspection-datasets/*",
+        "arn:aws:s3:::lng-inspection-docs",
+        "arn:aws:s3:::lng-inspection-docs/*",
+        "arn:aws:s3:::lng-inspection-archive",
+        "arn:aws:s3:::lng-inspection-archive/*"
+      ]
+    },
+    {
+      "Sid": "ReadBackForVerification",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::lng-inspection-models/*",
+        "arn:aws:s3:::lng-inspection-datasets/*",
+        "arn:aws:s3:::lng-inspection-docs/*",
+        "arn:aws:s3:::lng-inspection-archive/*"
+      ]
+    }
+  ]
+}

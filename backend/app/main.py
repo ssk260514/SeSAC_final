@@ -32,12 +32,6 @@ async def preload_models():
         print("[startup] 분류기 로드 완료")
     except Exception as e:
         print(f"[startup] 분류기 로드 실패: {e}")
-    try:
-        from app.services.manual_search import get_embedder
-        await loop.run_in_executor(None, get_embedder)
-        print("[startup] 임베더 로드 완료")
-    except Exception as e:
-        print(f"[startup] 임베더 로드 실패: {e}")
 
 
 @app.get("/api/health")
@@ -52,10 +46,11 @@ async def health_check():
 os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-from app.api import auth, tank, session, inspect, result
+from app.api import auth, tank, session, inspect, result, ota
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(tank.router, prefix="/api", tags=["tank"])
 app.include_router(session.router, prefix="/api", tags=["session"])
 app.include_router(inspect.router, prefix="/api", tags=["inspect"])
 app.include_router(result.router, prefix="/api", tags=["result"])
+app.include_router(ota.router, prefix="/api", tags=["ota"])
