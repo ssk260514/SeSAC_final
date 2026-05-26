@@ -50,9 +50,10 @@ class ResultReviewNotifier extends StateNotifier<ResultReviewState> {
     String? actionDetail,
   }) async {
     final server = state.raw?['server_result'] as Map<String, dynamic>?;
-    final resultId = server?['result_id'] as int?;
+    final device = state.raw?['device_result'] as Map<String, dynamic>?;
+    final resultId = (server?['result_id'] ?? device?['result_id']) as int?;
     if (resultId == null) {
-      state = state.copyWith(errorMessage: '서버 결과가 없어 저장할 수 없습니다.');
+      state = state.copyWith(errorMessage: '결과 ID가 없어 저장할 수 없습니다.');
       return false;
     }
 

@@ -77,10 +77,10 @@ async def get_image_detail(
     server = next((r for r in results if r[1] == '서버'), None)
 
     action = None
-    if server is not None:
+    for candidate in [r for r in [server, device] if r is not None]:
         rec = (await db.execute(text("""
             SELECT 권고_ID, 조치_요약, 조치_상세 FROM 조치_권고 WHERE 결과_ID = :rid
-        """), {"rid": server[0]})).first()
+        """), {"rid": candidate[0]})).first()
         if rec is not None:
             srcs = (await db.execute(text("""
                 SELECT m.매뉴얼_ID, m.제목, m.페이지_번호, m.청크_순서, x.순위, x.유사도_점수
@@ -96,6 +96,7 @@ async def get_image_detail(
                     for s in srcs
                 ],
             }
+            break
 
     def _row_to_dict(r, gradcam=False):
         if r is None:
@@ -110,11 +111,11 @@ async def get_image_detail(
         return out
 
     feedback = None
-    if server is not None:
+    for candidate in [r for r in [server, device] if r is not None]:
         fb = (await db.execute(text("""
             SELECT 피드백_ID, 수정된_결함_유형, 심각도, 의견, 최종_조치_내용
             FROM 검사_피드백 WHERE 결과_ID = :rid
-        """), {"rid": server[0]})).first()
+        """), {"rid": candidate[0]})).first()
         if fb is not None:
             feedback = {
                 "feedback_id": fb[0],
@@ -123,6 +124,7 @@ async def get_image_detail(
                 "opinion": fb[3],
                 "final_action_content": fb[4],
             }
+            break
 
     return {
         "image": {

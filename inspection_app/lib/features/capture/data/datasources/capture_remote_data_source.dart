@@ -37,4 +37,5 @@ class CaptureRemoteDataSource {
     );
     return InspectResponseDto.fromJson(res.data as Map<String, dynamic>);
   }
+
 }

@@ -302,15 +302,37 @@ async def local_result(
         RETURNING 결과_ID
     """), {
         "iid": image_id, "pid": pid, "dtype": dtype, "conf": conf,
-        "top3": __import__("json").dumps(top3), "ms": payload.get("inference_ms", 0),
+        "top3": json.dumps(top3), "ms": payload.get("inference_ms", 0),
     })).first()
+    result_id = res_row[0]
+
+    # RAG: 양품도 매뉴얼 검색 + 조치 가이드 생성
+    try:
+        from app.services.manual_search import search_manuals
+        manuals = await search_manuals(db, dtype, pid, top_k=3)
+        if manuals:
+            from app.services.llm import generate_action_guide
+            guide = await generate_action_guide(dtype, manuals)
+            rec_row = (await db.execute(text("""
+                INSERT INTO 조치_권고 (결과_ID, 조치_요약, 조치_상세, 생성_일시, 수정_일시)
+                VALUES (:rid, :sum, :det, NOW(), NOW())
+                RETURNING 권고_ID
+            """), {"rid": result_id, "sum": guide["summary"], "det": guide["detail"]})).first()
+            rec_id = rec_row[0]
+            for i, m in enumerate(manuals):
+                await db.execute(text("""
+                    INSERT INTO 조치_권고_매뉴얼 (권고_ID, 매뉴얼_ID, 순위, 유사도_점수)
+                    VALUES (:r, :m, :rank, :sim)
+                """), {"r": rec_id, "m": m["manual_id"], "rank": i + 1, "sim": m["similarity"]})
+    except Exception as rag_err:
+        print(f"[WARN] 양품 RAG 생성 실패: {rag_err}")
 
     await db.execute(text("""
         UPDATE 검사_세션 SET 총_이미지_수 = 총_이미지_수 + 1, 양품_수 = 양품_수 + 1
         WHERE 세션_ID = :sid
     """), {"sid": sid})
     await db.commit()
-    return {"image_id": image_id, "result_id": res_row[0]}
+    return {"image_id": image_id, "result_id": result_id}
 
 
 @router.post("/inspect/offline-batch")
