@@ -138,7 +138,7 @@ class InspectionHistoryScreen extends ConsumerWidget {
 
   void _onCardTap(BuildContext context, ResultCard card) {
     // 모든 카드는 먼저 분석 결과 모달을 보여준다.
-    //   - 서버 정밀분석 완료/미완료: 서버 결과 + RAG + "결과 처리" 버튼(→ /result)
+    //   - 서버 정밀분석 완료/미완료: 서버 결과 + 매뉴얼 기반 조치 가이드 + "결과 처리" 버튼(→ /result)
     //   - 단말 자동 종결(양품·오프라인): 단말 결과 + "닫기" 버튼
     // 모달 내부에서 hasServer 여부로 표시·버튼을 분기한다.
     showModalBottomSheet(

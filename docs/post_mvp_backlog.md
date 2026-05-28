@@ -47,7 +47,7 @@
 ### 3-1. iOS 빌드
 - **출처**: `명세서/제품_정의서.md` §4-3
 - **도입 조건**: 안드로이드 안정화 후 (P0/P1 버그 0건 4주 유지)
-- **작업 내용**: Flutter iOS 빌드 환경 셋업·CocoaPods·서명 인증서·App Store Connect 등록. `flutterfire configure` 시 iOS 추가
+- **작업 내용**: Flutter iOS 빌드 환경 셋업·CocoaPods·서명 인증서·App Store Connect 등록. (3차 변경으로 Firebase 의존성이 제거되어 `flutterfire configure` 단계는 더 이상 필요 없음, `tutorial/21`)
 - **예상 규모**: 16~24시간
 
 ### 3-2. 세션 중단(abort) 기능

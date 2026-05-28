@@ -49,11 +49,12 @@ class ResultReviewNotifier extends StateNotifier<ResultReviewState> {
     int? recommendationId,
     String? actionDetail,
   }) async {
+    // 서버 분석분은 서버 결과(대표), 단말 자동종결분은 단말 결과(대표)에 피드백을 붙인다.
     final server = state.raw?['server_result'] as Map<String, dynamic>?;
     final device = state.raw?['device_result'] as Map<String, dynamic>?;
-    final resultId = (server?['result_id'] ?? device?['result_id']) as int?;
+    final resultId = (server ?? device)?['result_id'] as int?;
     if (resultId == null) {
-      state = state.copyWith(errorMessage: '결과 ID가 없어 저장할 수 없습니다.');
+      state = state.copyWith(errorMessage: '검사 결과가 없어 저장할 수 없습니다.');
       return false;
     }
 

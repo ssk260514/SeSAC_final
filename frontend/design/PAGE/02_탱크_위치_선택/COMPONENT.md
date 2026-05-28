@@ -82,7 +82,7 @@
 ### 4.3 DataSource
 - **Remote**: `TankLocationRemoteDataSource` → API 참조: [API_SPEC.md](../../../데이터/API_SPEC.md)
 - **Local**: `TankLocationLocalDataSource` → `flutter_secure_storage` (`tank_type`, `selected_sector`, `selected_subsector`)
-- **Local**: TFLite 모델 파일 캐시 (Firebase ML)
+- **Local**: TFLite 모델 파일 캐시 (S3 presigned URL OTA — 3차 변경, `tutorial/21`)
 
 ### 4.4 Repository 구현
 > TODO: `TankLocationRepositoryImpl`, `ModelRegistryRepositoryImpl`

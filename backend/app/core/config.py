@@ -21,8 +21,9 @@ class Settings(BaseSettings):
 
     SERVER_BASE_URL: str = "http://localhost:8000"  # .env에서 실제 기기 IP로 오버라이드 필요
 
-    # S3 양품 샘플 저장
-    S3_BUCKET: str = "lng-inspection-samples"
+    # S3 운영 데이터 버킷 — inspections/ (원본), samples/ (학습셋), heatmaps/ (Grad-CAM)
+    # 모든 검사 이미지·히트맵·학습셋을 단일 버킷의 프리픽스로 분리 보관.
+    S3_DATA_BUCKET: str = "lng-inspection-data"
     # 모델 전용 버킷 — 샘플/검사 데이터와 IAM 경계 분리 (Firebase ML 분리 계정 대체).
     # 앱에는 AWS 키를 주지 않고, 백엔드가 발급한 presigned URL로만 다운로드시킨다.
     S3_MODELS_BUCKET: str = "lng-inspection-models"

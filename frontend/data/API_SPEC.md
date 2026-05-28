@@ -47,10 +47,10 @@
 | GET | `/api/sessions` | SESS-002 | 세션 이력 목록 조회 | ✅ |
 | PATCH | `/api/sessions/{id}/end` | SESS-003 | 세션 종료 | ✅ |
 | GET | `/api/dashboard/summary` | SESS-004 | 대시보드 요약 조회 | ✅ |
-| POST | `/api/inspect` | INFER-002 | 서버 정밀 분석 (분류+Grad-CAM+매뉴얼 직접 조회) | ✅ |
-| POST | `/api/inspect/local-result` | INFER-003 | 양품 단말 결과 기록 | ✅ |
-| POST | `/api/inspect/sample-upload` | INFER-004 | 양품 10% 샘플 업로드 | ✅ |
-| POST | `/api/inspect/offline-batch` | INFER-005 | 오프라인 큐 배치 업로드 (멱등성, 3주차) | ✅ |
+| POST | `/api/inspect` | INFER-002 | 양품·불량 통합 검사 (서버 재추론 + C-B 검증 + S3 + 매뉴얼 조회) | ✅ |
+| ~~POST~~ | ~~`/api/inspect/local-result`~~ | ~~INFER-003~~ | **폐지** — INFER-002로 흡수 | — |
+| ~~POST~~ | ~~`/api/inspect/sample-upload`~~ | ~~INFER-004~~ | **폐지** — 학습셋 복사는 서버가 INFER-002/005 내부 처리 | — |
+| POST | `/api/inspect/offline-batch` | INFER-005 | 오프라인 큐 배치 (서버 재추론·검증, 이미지 동봉 필수, 멱등성) | ✅ |
 | GET | `/api/model/version` | OTA-001 | 모델 버전 확인 (OTA) | ✅ |
 | PATCH | `/api/admin/models/{id}/activate` | OTA-002 | 모델 활성화 (시스템 인증, 운영용) | X-Admin-API-Key |
 | GET | `/api/sessions/{id}/results` | RESULT-001 | 세션별 결과 목록 조회 | ✅ |
@@ -490,7 +490,9 @@ Dio Interceptor가 401 응답 감지 → 자동으로 `/api/auth/refresh` 호출
 | 인증 | ✅ |
 | Content-Type | `multipart/form-data` |
 | 화면 | 화면 5 (카메라 백그라운드) → 결과 화면 4 확인 |
-| 설명 | 불량/저신뢰도 이미지 서버 전송 → 정밀 분석 (분류 + Grad-CAM + RAG) |
+| 설명 | **양품·불량 통합** 검사 엔드포인트(구 local-result·sample-upload 흡수). 모든 촬영이 이미지를 S3 inspections/에 1회 업로드하고 서버 재추론으로 검증. 온라인 동기 처리(정책 A). |
+
+> **C-B 단말·서버 검증 합의제**: `단말=양품 ∧ 서버=양품 ∧ server_conf≥0.85` → 결과_처리_상태='완료'(자동종결). 그 외(불일치/저신뢰/불량) → '미완료' + 학습셋 자동 복사. Grad-CAM·heatmaps/는 **서버가 불량으로 분류한 항목만** 생성. random 10% fill(양품·불량 공통)은 **서버가 결정**(`needs_sample` 파라미터 없음). 학습셋 라벨=서버 재추론값.
 
 **요청 (Request)**
 ```
@@ -514,26 +516,25 @@ on_device_result: {
 ```
 1. JWT 인증 확인
 2. 이미지 전처리 (384×384, ImageNet 정규화)
-3. MobileNetV3(.pth, 단일 통합 30클래스) 재추론
-   ├─ 신뢰도 < SERVER_RECHECK_THRESHOLD (전역 0.70 — config.py) → 사람_재확인_필요=true
-   └─ 신뢰도 ≥ SERVER_RECHECK_THRESHOLD                          → 정상 분류
-4. Grad-CAM 히트맵 생성 → uploads/heatmaps/*.png 저장 (운영 단계 S3 마이그레이션)
+1.5 원본 이미지 → S3 `inspections/{YYYY}/{MM}/{DD}/{uuid}.jpg` (1회 업로드, 로컬 디스크 미저장)
+3. MobileNetV3(.pth, 단일 통합 30클래스) 재추론 → server_class, server_confidence
+3.5 C-B 검증 분기:
+   ├─ 서버=양품 ∧ 단말=양품 ∧ conf≥GLOBAL_CONFIDENCE_THRESHOLD(0.85) → 결과_처리_상태='완료', 사람_재확인_필요=false
+   ├─ 서버=양품 이나 위 미충족(저신뢰/단말 불일치) → '미완료', 사람_재확인_필요=true, 학습셋 복사
+   └─ 서버=불량 → '미완료', 사람_재확인_필요=(conf<SERVER_RECHECK_THRESHOLD 0.70), (저신뢰 or 단말 양품 flip이면 학습셋 복사)
+4. Grad-CAM 히트맵 (**서버 불량 분류분만**) → S3 `heatmaps/{date}/{uuid}.png`
 5. 매뉴얼 직접 조회 (LLM·임베딩·벡터 검색 없음):
-   a. SELECT 매뉴얼_ID, 제목, 내용, 조치_요약, 조치_상세, 출처, 페이지_번호, 청크_순서
-      FROM 매뉴얼 WHERE 공정_ID=:pid AND 결함_유형=:defect_type
-      ORDER BY 청크_순서 LIMIT 3
-   b. 결과 0행이면 WHERE 공정_ID=:pid 로 폴백
-   c. 매칭 청크의 사전 작성 `조치_요약`(≤500자)·`조치_상세`(단계별)를 그대로 사용
-6. 결과 통합 JSON 응답
-7. BackgroundTasks 비동기 저장:
-   - 원본 이미지 → uploads/images/*.jpg (운영 단계 S3 마이그레이션)
-   - 검사_이미지 INSERT (탱크_타입 컬럼 없음 — 세션 JOIN으로 조회)
-   - 검사_결과 INSERT × 1~2 (서버 항상: 대표_여부=true / 단말 동봉 시 추가: 대표_여부=false)
-     · 결함_유형 VARCHAR NOT NULL 직접 컬럼에 최종 클래스 저장
-     · 상위_예측 JSONB에 Top-3 동시 저장
-   - 조치_권고 INSERT + 조치_권고_매뉴얼 INSERT × 1~3
-     · UNIQUE (권고_ID, 순위), UNIQUE (권고_ID, 매뉴얼_ID) 제약 적용
-   - 검사_세션 카운터 UPDATE (총_이미지_수 / 양품_수 / 불량_수)
+   a. SELECT … FROM 매뉴얼 WHERE 결함_유형=:server_class ORDER BY 매뉴얼_ID LIMIT 1
+      (결함_유형 30클래스 전역 유일 → 공정_ID 불필요. 양품 클래스도 매뉴얼 양품 행으로 처리. 미등록 시 조치_권고 생략)
+   b. 사전 작성 `조치_요약`·`조치_상세`를 그대로 사용
+6. 학습셋 복사 (active learning ∪ 서버 random 10%): `samples/{date}/{서버라벨}/{uuid}.jpg` COPY (uuid당 1객체)
+7. 동기 저장(트랜잭션 커밋):
+   - 검사_이미지 INSERT (이미지_경로=s3://… inspections uri, 탱크_타입 컬럼 없음 — 세션 JOIN)
+   - 검사_결과 INSERT × 1~2 (서버 대표_여부=true / 단말 동봉 시 대표_여부=false, 둘 다 결과_처리_상태=위 분기값)
+     · 결함_유형 직접 컬럼 + 상위_예측 JSONB(Top-3)
+   - 조치_권고 INSERT + 조치_권고_매뉴얼 INSERT × 1 (순위=1)
+   - 검사_세션 카운터 UPDATE (서버 분류 기준 양품_수/불량_수)
+8. 결과 통합 JSON 응답
 ```
 
 > `SERVER_RECHECK_THRESHOLD`(서버 재확인 임계값)는 전역 단일값 0.70. 코드는 `config.py`의 본 설정을 우선 참조하며, `공정.서버_재확인_임계값` 컬럼은 유지하되 모든 행이 동일 값. INFER-002는 공정별 차등 없음.
@@ -561,84 +562,48 @@ on_device_result: {
     "summary": "도장 균열 부위 재도장 필요",
     "detail": "1) 균열 부위 주변 50mm 범위를 사포(#180)로 연마\n2) 프라이머 도포 후 24시간 건조\n3) 상도 2회 도장",
     "source_manuals": [
-      {"manual_id": 23, "title": "표면처리 정비 지침서", "page": 45, "chunk_order": 3, "rank": 1, "similarity": 1.0},
-      {"manual_id": 24, "title": "표면처리 정비 지침서", "page": 47, "chunk_order": 5, "rank": 2, "similarity": 1.0},
-      {"manual_id": 25, "title": "표면처리 정비 지침서", "page": 48, "chunk_order": 6, "rank": 3, "similarity": 1.0}
+      {"manual_id": 23, "title": "표면처리 정비 지침서", "page": 45, "chunk_order": 3, "rank": 1, "similarity": 1.0}
     ]
   }
 }
 ```
 
-> `source_manuals`: 결함 유형 직접 조회로 매칭된 청크 메타데이터 배열. `rank`=`청크_순서` ASC 순서(1=가장 작은 청크), `similarity`=직접 조회이므로 기본 `1.0` (필드는 호환성 유지 목적으로 응답에 포함).
+> `source_manuals`: 결함_유형 단독 직접 조회로 매칭된 매뉴얼 1건의 메타데이터. `rank`=1 고정, `similarity`=직접 조회이므로 `1.0` (필드는 호환성 유지 목적으로 응답에 포함).
 
 **ERD 연동**
 | 작업 | 테이블 | 컬럼 |
 |---|---|---|
-| WRITE | `검사_이미지` | INSERT (세션_ID, 이미지_경로=S3 URL, 촬영_일시) — **탱크_타입 컬럼 없음** (세션 JOIN으로 조회) |
-| WRITE | `검사_결과` | INSERT × 2 (이미지_ID, 공정_ID, 모델_ID, 추론_위치, 대표_여부, 품질_여부, **결함_유형**, 신뢰도_점수, 상위_예측, 추론_지연_ms, 사람_재확인_필요, Grad-CAM_경로, 결과_처리_상태='미완료') |
+| WRITE | `검사_이미지` | INSERT (세션_ID, 이미지_경로=`s3://lng-inspection-data/inspections/…`, 촬영_일시) — **탱크_타입 컬럼 없음** (세션 JOIN으로 조회) |
+| WRITE | `검사_결과` | INSERT × 1~2 (이미지_ID, 공정_ID, 추론_위치, 대표_여부, 품질_여부, **결함_유형**, 신뢰도_점수, 상위_예측, 추론_지연_ms, 사람_재확인_필요, Grad-CAM_경로=`s3://…heatmaps/…`(불량분만), **결과_처리_상태=C-B 분기값** '완료'/'미완료') |
 | WRITE | `조치_권고` | INSERT (결과_ID, 조치_요약, 조치_상세) — **매뉴얼_ID FK 없음** (조치_권고_매뉴얼로 이관) |
-| WRITE | `조치_권고_매뉴얼` | INSERT × 1~3 (권고_ID, 매뉴얼_ID, 순위 1~3, 유사도_점수=1.0, 생성_일시) |
-| READ | `매뉴얼` | `WHERE 공정_ID=? AND 결함_유형=?` 직접 조회 (`idx_manual_defect_type`). 미매칭 시 `WHERE 공정_ID=?` 폴백 — `조치_요약`/`조치_상세`/`출처`/`페이지_번호`/`청크_순서` 추출 |
+| WRITE | `조치_권고_매뉴얼` | INSERT × 1 (권고_ID, 매뉴얼_ID, 순위=1, 유사도_점수=1.0, 생성_일시) |
+| READ | `매뉴얼` | `WHERE 결함_유형=?` 단독 직접 조회 (결함_유형 전역 유일, 공정_ID 불사용). `조치_요약`/`조치_상세`/`출처`/`페이지_번호`/`청크_순서` 추출. 미등록 시 조치_권고 생략 |
 | READ | `공정` | 신뢰도_임계값 (단말 컷오프), **서버_재확인_임계값** (사람_재확인_필요 분기) — 전역 단일값 (공정별 차등 없음) |
 | UPDATE | `검사_세션` | 총_이미지_수 += 1, 양품_수/불량_수 += 1 (품질_여부 기준) |
 
 ---
 
-### INFER-003 — 양품 단말 결과 기록
+### INFER-003 — 양품 단말 결과 기록 *(폐지)*
 
 | 항목 | 내용 |
 |---|---|
-| 기능 ID | INFER-003 |
-| API | `POST /api/inspect/local-result` |
-| 인증 | ✅ |
-| 화면 | 화면 5 (카메라 백그라운드) |
-| 설명 | 단말에서 양품 판정된 결과를 서버에 기록 (이미지 없이 메타만 전송) |
+| 기능 ID | ~~INFER-003~~ |
+| API | ~~`POST /api/inspect/local-result`~~ |
+| 상태 | **폐지 (2026-05-28, 4차)** — INFER-002로 흡수 |
 
-**요청 (Request)**
-```json
-{
-  "session_id": 42,
-  "process_id": 1,
-  "tank_type": "B",
-  "defect_type": "표면양품-도장",
-  "confidence": 0.952,
-  "top3_predictions": [
-    {"class": "표면양품-도장", "confidence": 0.952},
-    {"class": "표면양품-보온재", "confidence": 0.038},
-    {"class": "스크래치-도장", "confidence": 0.010}
-  ],
-  "inference_ms": 165,
-  "model_id": 7,
-  "is_sampling": false,
-  "captured_at": "2026-05-08T09:35:12Z"
-}
-```
-
-> `defect_type`: 모델이 출력한 정확한 클래스명 (예: `"표면양품-도장"`). 단순 `"양품"` 문자열 아님.
-> 품질_여부(BOOLEAN) 도출: `defect_type`에 `"양품"` 문자열이 포함되는지로 서버가 판별 (통합 30클래스 공통 규칙 — 공정 무관).
-
-**처리 로직**
-1. `검사_이미지` INSERT
-2. `검사_결과` INSERT 1행 (추론_위치='단말', 대표_여부=true, 결과_처리_상태='완료')
-3. `검사_세션` UPDATE: 총_이미지_수 += 1, 양품_수 += 1
-4. `is_sampling == true`이면 이미지 업로드 큐 추가
+> C-B 전환으로 양품도 100% 서버 재추론·이미지 업로드가 필요해져, 메타만 전송하던 local-result는 제거됨. 온라인 양품은 INFER-002(`/inspect`)를 동기 호출하고, 오프라인 양품은 INFER-005(offline-batch)로 동기화한다.
 
 ---
 
-### INFER-004 — 양품 10% 샘플링 업로드
+### INFER-004 — 양품 10% 샘플링 업로드 *(폐지)*
 
 | 항목 | 내용 |
 |---|---|
-| 기능 ID | INFER-004 |
-| API | `POST /api/inspect/sample-upload` |
-| 인증 | ✅ |
-| Content-Type | `multipart/form-data` |
-| 설명 | 양품 이미지 중 10% 확률로 이미지 업로드 (학습 데이터 확보) |
+| 기능 ID | ~~INFER-004~~ |
+| API | ~~`POST /api/inspect/sample-upload`~~ |
+| 상태 | **폐지 (2026-05-28, 4차)** — 학습셋 복사는 서버가 INFER-002/005 내부에서 처리 |
 
-**ERD 연동**
-| 작업 | 테이블 | 컬럼 |
-|---|---|---|
-| UPDATE | `검사_이미지` | 이미지_경로=S3 URL (샘플 업로드 후 경로 갱신) |
+> 모든 이미지가 inspections/에 업로드되므로 별도 샘플 업로드가 불필요. random 10% fill은 **서버가** `random()<0.10`(양품·불량 공통)으로 결정해 `samples/{서버라벨}/`에 복사한다(클라 `needs_sample` 신호 폐지).
 
 ---
 
@@ -650,12 +615,12 @@ on_device_result: {
 | API | `POST /api/inspect/offline-batch` |
 | 인증 | ✅ |
 | Content-Type | `multipart/form-data` |
-| 설명 | 네트워크 끊김 중 sqflite에 누적된 불량/저신뢰도 이미지 일괄 업로드. INFER-002의 배치 버전. 멱등성 키(`client_request_id`) 지원 |
+| 설명 | 네트워크 끊김 중 sqflite에 누적된 검사(불량/저신뢰 + **양품 자동종결분 포함**)를 일괄 동기화. **INFER-002와 동일하게 서버 재추론·C-B 검증·단말+서버 2행·Grad-CAM·학습셋 복사**. **모든 메타에 이미지 동봉 필수**(누락 시 해당 항목 IMAGE_MISSING). 멱등성 키(`client_request_id`)로 중복 차단. 클라는 10건 청크 루프로 전송 |
 
 **요청**
 ```
-images[]:  [바이너리 이미지 배열, N개]
-metadata:  JSON 배열 (images[]와 동일 순서)
+images:    [바이너리 이미지 — 모든 메타에 필수]. 각 파일의 filename = "{client_request_id}.jpg" 로 매칭(순서 무관).
+metadata:  JSON 배열 (M개 항목, 권장 10)
 ```
 
 `metadata` 배열 항목:
@@ -667,6 +632,7 @@ metadata:  JSON 배열 (images[]와 동일 순서)
     "process_id": 1,
     "tank_type": "B",
     "captured_at": "2026-05-08T09:35:12Z",
+    "kind": "defect",            // "defect" | "pass" (참고용 — 분류는 서버 재추론으로 재판정)
     "on_device_result": {
       "defect_type": "균열-도장",
       "confidence": 0.78,
@@ -674,48 +640,37 @@ metadata:  JSON 배열 (images[]와 동일 순서)
       "top3_predictions": [
         {"class": "균열-도장", "confidence": 0.78},
         {"class": "스크래치-도장", "confidence": 0.12},
-        {"class": "스크래치-도장", "confidence": 0.04}
+        {"class": "도막떨어짐-도장", "confidence": 0.04}
       ]
     }
   }
 ]
 ```
 
-> 배치 크기 제한: 1회 최대 50건. 초과 시 `400 BATCH_SIZE_LIMIT_EXCEEDED`. 클라이언트가 50건 단위 청크 분할 순차 호출.
-> `client_request_id`: UUID v4 멱등성 키 — 동일 UUID 재수신 시 이전 결과 반환 (중복 INSERT 방지).
+> 배치 크기 제한: 1회 최대 50건(서버 상한 — 안전장치). 클라이언트는 **10건 청크로 큐가 빌 때까지 반복** 호출.
+> 이미지는 **모든 메타에 필수**. `crid`에 매칭되는 이미지가 없으면 해당 항목만 `status="failed", error_code="IMAGE_MISSING"`.
+> `client_request_id`: UUID v4 멱등성 키 — 동일 UUID 재수신 시 `멱등성_요청` 테이블에서 감지해 `status="skipped"`(DUPLICATE)로 응답.
 
 **응답 200**
 ```json
 {
-  "batch_size": 5,
-  "succeeded_count": 4,
-  "failed_count": 1,
   "results": [
     {
       "client_request_id": "550e8400-e29b-41d4-a716-446655440000",
       "status": "success",
       "image_id": 156,
-      "server_result": {"result_id": 312, "defect_type": "균열-도장", "confidence": 0.923, "inference_ms": 1240, "needs_human_review": false},
-      "on_device_result": {"result_id": 311, "defect_type": "균열-도장", "confidence": 0.78, "inference_ms": 180},
-      "heatmap_url": "https://s3.../heatmap_156.png",
-      "action_guide": {
-        "recommendation_id": 89,
-        "summary": "도장 균열 부위 재도장 필요",
-        "detail": "...",
-        "source_manuals": [
-          {"manual_id": 23, "title": "표면처리 정비 지침서", "page": 45, "chunk_order": 3, "rank": 1, "similarity": 0.91}
-        ]
-      }
+      "server_result": {"result_id": 312, "defect_type": "균열-도장", "confidence": 0.78, "inference_ms": 180, "needs_human_review": false}
     },
     {
       "client_request_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-      "status": "failed",
-      "error_code": "INFERENCE_ERROR",
-      "error_message": "이미지 디코딩 실패"
+      "status": "skipped",
+      "reason": "DUPLICATE"
     }
   ]
 }
 ```
+
+> `status`는 `success` / `skipped`. `server_result`는 (서버 재추론이 아니라) **단말 추론값 그대로 echo**, `needs_human_review`는 항상 `false`(단말 자동 종결). 클라이언트는 둘 다 sqflite 큐에서 제거하며, `client_request_id`로 매칭(배열 순서 의존 X).
 
 ---
 
@@ -1095,10 +1050,10 @@ metadata:  JSON 배열 (images[]와 동일 순서)
 | AUTH-003 (logout) | ✅ (audit 로그만) | | | | 토큰 블랙리스트(Redis)는 Post-MVP |
 | ZONE-001 / ZONE-002 / PROC-001 | ✅ | | | | |
 | SESS-001 ~ SESS-004 | ✅ | | | | 1일 1세션 partial UNIQUE index 적용 |
-| INFER-002 (서버 정밀 분석) | ✅ | | | | 1주차는 키워드 검색, 2주차 매뉴얼 직접 조회(`조치_요약`/`조치_상세` 사전 작성)로 교체 |
-| INFER-003 (단말 양품 결과) | ❌ | ✅ | | | 1주차는 단말 추론 없음 — 모든 사진 서버 전송 |
-| INFER-004 (양품 10% 샘플) | ❌ | | ✅ | | S3 비동기 업로드 |
-| INFER-005 (오프라인 배치) | ❌ | | ✅ | | `client_request_id` 멱등성 키 |
+| INFER-002 (양품·불량 통합) | ✅ | | | ✅ | 4차(C-B): 양품·불량 통합·서버 검증 합의제·S3·presigned. local-result/sample-upload 흡수 |
+| ~~INFER-003 (단말 양품 결과)~~ | ❌ | ✅ | | ~~폐지~~ | **4차 폐지** — INFER-002로 흡수 |
+| ~~INFER-004 (양품 10% 샘플)~~ | ❌ | | ✅ | ~~폐지~~ | **4차 폐지** — 서버 random 10%로 대체 |
+| INFER-005 (오프라인 배치) | ❌ | | ✅ | ✅ | 4차: 서버 재추론·검증, 이미지 필수, 10건 청크. `client_request_id` 멱등성 |
 | OTA-001 (모델 버전) | ❌ | | ✅ | | S3 presigned URL 발급 (3차 변경: Firebase ML 제거, `tutorial/21`) |
 | OTA-002 (모델 활성화) | ❌ | | ✅ | | `X-Admin-API-Key`, 단일 활성 모델 트랜잭션 |
 | RESULT-001 / RESULT-002 | ✅ | | | | `thumbnail_url`은 MVP 원본 URL과 동일 (Post-MVP CloudFront Resizing) |
@@ -1121,7 +1076,6 @@ metadata:  JSON 배열 (images[]와 동일 순서)
 | 400 | INVALID_SUBSECTOR | `selected_subsector`가 `검사_구역.구역_코드[selected_sector]` 배열에 없음 |
 | 400 | INCOMPLETE_RESULTS_EXIST | 세션 내 미완료 건 존재 (세션 종료 불가) |
 | 400 | BATCH_SIZE_LIMIT_EXCEEDED | INFER-005 배치 크기 50건 초과 |
-| 400 | METADATA_IMAGE_COUNT_MISMATCH | INFER-005 images[]와 metadata 배열 길이 불일치 |
 | 401 | AUTH_FAILED | 인증 실패 (ID 또는 비밀번호 오류) |
 | 401 | TOKEN_EXPIRED | 액세스 토큰 만료 |
 | 401 | ADMIN_AUTH_FAILED | 관리자 API 시스템 인증 실패 |

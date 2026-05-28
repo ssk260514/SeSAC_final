@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../storage/token_storage.dart';
+import '../../features/auth/presentation/providers/auth_providers.dart';
 
 /// 백엔드 베이스 URL
 /// - 에뮬레이터: http://10.0.2.2:8000/api
@@ -82,7 +83,7 @@ final dioProvider = Provider<Dio>((ref) {
   final dio = Dio(BaseOptions(
     baseUrl: kApiBaseUrl,
     connectTimeout: const Duration(seconds: 10),
-    receiveTimeout: const Duration(seconds: 30),
+    receiveTimeout: const Duration(seconds: 60),
     headers: {'Content-Type': 'application/json'},
   ));
 
@@ -93,6 +94,9 @@ final dioProvider = Provider<Dio>((ref) {
     refreshDio: refreshDio,
     onUnauthorized: () {
       tokenStorage.clear();
+      // 인증 상태도 초기화해야 라우터(refreshListenable)가 로그인으로 리다이렉트한다.
+      // 이게 없으면 토큰 만료 후에도 라우터가 "로그인됨"으로 착각해 빈 화면에 고착된다.
+      ref.read(currentInspectorProvider.notifier).state = null;
     },
   ));
 

@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from app.core.db import get_db
 from app.api.deps import get_current_inspector_id
+from app.services import s3_store
 
 
 router = APIRouter()
@@ -40,7 +41,7 @@ async def list_session_results(
     return [
         {
             "image_id": row[0],
-            "thumbnail_url": row[1],
+            "thumbnail_url": await s3_store.generate_presigned(row[1]),
             "captured_at": row[2].isoformat(),
             "defect_type": row[3],
             "is_defect": not bool(row[4]),
@@ -77,10 +78,10 @@ async def get_image_detail(
     server = next((r for r in results if r[1] == '서버'), None)
 
     action = None
-    for candidate in [r for r in [server, device] if r is not None]:
+    if server is not None:
         rec = (await db.execute(text("""
             SELECT 권고_ID, 조치_요약, 조치_상세 FROM 조치_권고 WHERE 결과_ID = :rid
-        """), {"rid": candidate[0]})).first()
+        """), {"rid": server[0]})).first()
         if rec is not None:
             srcs = (await db.execute(text("""
                 SELECT m.매뉴얼_ID, m.제목, m.페이지_번호, m.청크_순서, x.순위, x.유사도_점수
@@ -96,7 +97,6 @@ async def get_image_detail(
                     for s in srcs
                 ],
             }
-            break
 
     def _row_to_dict(r, gradcam=False):
         if r is None:
@@ -111,11 +111,11 @@ async def get_image_detail(
         return out
 
     feedback = None
-    for candidate in [r for r in [server, device] if r is not None]:
+    if server is not None:
         fb = (await db.execute(text("""
             SELECT 피드백_ID, 수정된_결함_유형, 심각도, 의견, 최종_조치_내용
             FROM 검사_피드백 WHERE 결과_ID = :rid
-        """), {"rid": candidate[0]})).first()
+        """), {"rid": server[0]})).first()
         if fb is not None:
             feedback = {
                 "feedback_id": fb[0],
@@ -124,13 +124,12 @@ async def get_image_detail(
                 "opinion": fb[3],
                 "final_action_content": fb[4],
             }
-            break
 
     return {
         "image": {
             "image_id": img[0],
-            "image_url": img[1],
-            "gradcam_url": server[6] if server else None,
+            "image_url": await s3_store.generate_presigned(img[1]),
+            "gradcam_url": await s3_store.generate_presigned(server[6]) if server and server[6] else None,
             "captured_at": img[2].isoformat(),
         },
         "device_result": _row_to_dict(device),
@@ -153,14 +152,17 @@ async def save_feedback(
     db: AsyncSession = Depends(get_db),
 ):
     r = (await db.execute(text("""
-        SELECT 결과_ID, 결함_유형, (SELECT 세션_ID FROM 검사_이미지 WHERE 이미지_ID = r.이미지_ID)
-        FROM 검사_결과 r WHERE 결과_ID = :rid
+        SELECT r.결과_ID, r.결함_유형,
+               (SELECT 세션_ID FROM 검사_이미지 WHERE 이미지_ID = r.이미지_ID),
+               (SELECT 이미지_경로 FROM 검사_이미지 WHERE 이미지_ID = r.이미지_ID)
+        FROM 검사_결과 r WHERE r.결과_ID = :rid
     """), {"rid": result_id})).first()
     if r is None:
         raise HTTPException(status_code=404, detail={"error": "NOT_FOUND"})
 
     original_type = r[1]
     session_id = body.get("session_id") or r[2]
+    inspections_uri = r[3]
     modified_type = body.get("modified_defect_type")
     inspector_modified = modified_type is not None and modified_type != original_type
 
@@ -193,6 +195,14 @@ async def save_feedback(
     """), {"rid": result_id})
 
     await db.commit()
+
+    # 라벨 수정 시 학습셋 MOVE: samples/{원라벨} DELETE + samples/{수정라벨} COPY
+    if inspector_modified and inspections_uri and inspections_uri.startswith("s3://"):
+        try:
+            await s3_store.move_samples_label(inspections_uri, original_type, modified_type)
+        except Exception as mv_err:
+            print(f"[WARN] 학습셋 MOVE 실패: {mv_err}")
+
     return {
         "feedback_id": feedback_id,
         "result_id": result_id,

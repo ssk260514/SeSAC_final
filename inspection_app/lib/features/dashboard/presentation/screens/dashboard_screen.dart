@@ -72,6 +72,8 @@ class DashboardScreen extends ConsumerWidget {
             tooltip: '로그아웃',
             onPressed: () async {
               await ref.read(tokenStorageProvider).clear();
+              // 인증 상태 초기화 — 미초기화 시 라우터가 '로그인됨'으로 오판해 탱크선택으로 튕김
+              ref.read(currentInspectorProvider.notifier).state = null;
               if (!context.mounted) return;
               context.go(AppRoutes.login);
             },

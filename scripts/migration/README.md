@@ -5,9 +5,12 @@ GCP 의존성을 제거하고 모든 파일을 AWS S3로 단일화하기 위한 
 
 ## 버킷 설계 (용도별 분리)
 
+> 🛑 **4차 변경(2026-05-28)**: `lng-inspection-samples` **폐기**, 신규 `lng-inspection-data`(프리픽스 `inspections/`·`samples/`·`heatmaps/`)로 통합. 백엔드는 `S3_DATA_BUCKET`을 PUT/GET/DELETE. 상세: [`계획 변경 내용.md` §13](../../명세서/계획%20변경%20내용.md).
+
 | 버킷 | 용도 | 누가 쓰는가 |
 |---|---|---|
-| `lng-inspection-samples` | 양품 샘플 (기존 운영 중, **이 스크립트에서 건드리지 않음**) | 백엔드 PUT |
+| ~~`lng-inspection-samples`~~ | ~~양품 샘플~~ → **4차 폐기**, `lng-inspection-data`로 대체 | — |
+| `lng-inspection-data` | 운영 이미지 `inspections/` + 학습셋 `samples/` + Grad-CAM `heatmaps/` | 백엔드 PUT/GET/DELETE |
 | `lng-inspection-models` | `.tflite` / `.pth` 모델 (OTA) | 백엔드 GET(presigned), 운영자 PUT |
 | `lng-inspection-datasets` | 재학습용 원본/라벨 이미지 | 운영자 PUT, 학습 파이프라인 GET |
 | `lng-inspection-docs` | 매뉴얼·명세서 PDF 등 | 운영자 PUT, 백엔드 GET(선택) |

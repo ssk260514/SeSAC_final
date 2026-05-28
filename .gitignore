@@ -5,3 +5,10 @@
 .env.*
 !.env.example
 !.env_example
+
+# 보안 키 파일
+*.jks
+*.keystore
+key.properties
+# google-services.json — 3차 변경(2026-05-26) 이후 사용하지 않지만 누가 실수로 다시 받아도 커밋되지 않도록 보호 유지
+google-services.json

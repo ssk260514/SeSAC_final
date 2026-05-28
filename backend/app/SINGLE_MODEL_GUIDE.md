@@ -15,8 +15,8 @@
 | 모델 선택 | **단일 모델 1개 가정**. `WHERE 모델_유형 IN ('PTH','TFLITE') AND 활성_여부=true` (공정_ID 조건 **금지**) |
 | 양품 판별 | `defect_type` 클래스명에 `"양품"` 포함 여부 — `'양품' in defect_type` (서버) / `defectType.contains('양품')` (Flutter) |
 | 신뢰도 임계값 | `settings.GLOBAL_CONFIDENCE_THRESHOLD` (0.85) · `settings.SERVER_RECHECK_THRESHOLD` (0.70). `공정.신뢰도_임계값` DB 조회 금지(전역 단일) |
-| `process_id` | 폼/JSON 필드로 받되 **모델 선택에 사용 금지**. 위치 기록·RAG 매뉴얼 범위 한정용 메타 |
-| RAG 매뉴얼 검색 | `WHERE 매뉴얼.공정_ID = 세션.공정_ID` **유지** (공정별 매뉴얼 분리는 불변) |
+| `process_id` | 폼/JSON 필드로 받되 **모델 선택·매뉴얼 룩업에 사용 금지**. **위치 기록 전용 메타** |
+| 매뉴얼 검색 | `WHERE 매뉴얼.결함_유형 = :defect_type ORDER BY 매뉴얼_ID LIMIT 1` — 결함_유형 전역 유일이라 공정_ID 불필요. 단일 매뉴얼 매칭, 폴백 없음. RAG/임베딩/벡터 검색 미사용 |
 
 ---
 
@@ -30,15 +30,15 @@
 - 응답의 `process_id`: 검사_구역에서 `tank_type` → `공정_ID` 매핑은 그대로 (위치 메타용)
 
 ### 2-2. `app/api/inspect.py` (신규) — 분류·INFER 시리즈
-- INFER-001 (단말 결과 등록), INFER-002 (서버 추론), INFER-003 (Top-3), INFER-004 (양품 샘플링), INFER-005 (오프라인 배치) 전부 단일 모델 전제
+- INFER-002 (양품·불량 통합 검사, C-B 단말·서버 검증 합의제 — `_process_inspection` 공통 함수), INFER-005 (오프라인 배치 — 동일 로직 재사용) 전부 단일 모델 전제. **INFER-003(local-result)·INFER-004(sample-upload)는 4차에서 INFER-002로 흡수·폐지**. 이미지·히트맵·학습셋은 S3 `lng-inspection-data`(inspections/·heatmaps/·samples/), detail/list 응답은 presigned URL 변환 (`app/services/s3_store.py`)
 - 분류기는 **30클래스** 출력 (`out_features=30`)
 - `품질_여부` 도출: `is_pass = '양품' in top1_class` (사용자 전제 4)
 - `사람_재확인_필요`: `top1_confidence < settings.SERVER_RECHECK_THRESHOLD`
-- `process_id` 폼 필드는 받되 모델 선택에 사용하지 않음. RAG 검색에서만 `세션.공정_ID` 활용
+- `process_id` 폼 필드는 받되 모델 선택·매뉴얼 룩업 어디에도 사용하지 않음 (룩업은 `결함_유형` 단독). 위치 기록 전용 메타
 
 ### 2-3. `app/api/session.py` (신규) — 검사 세션
 - 단일 모델과 무관 — 기존 명세 그대로
-- `검사_세션.공정_ID`는 검사_구역 매핑값 그대로 저장 (위치 기록·RAG 메타)
+- `검사_세션.공정_ID`는 검사_구역 매핑값 그대로 저장 (위치 기록 전용 메타. 매뉴얼 룩업에는 사용하지 않음)
 
 ### 2-4. `app/api/result.py` (신규) — 결과 처리
 - 결함 유형 드롭다운 데이터 소스: `모델_레지스트리.클래스_라벨` 30개 (공정.결함_유형_목록 사용 금지)

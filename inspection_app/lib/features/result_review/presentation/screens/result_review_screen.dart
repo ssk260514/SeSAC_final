@@ -72,13 +72,14 @@ class _ResultReviewBodyState extends ConsumerState<_ResultReviewBody> {
 
   void _initFromState(ResultReviewState state) {
     if (_initialized || state.raw == null) return;
+    // 서버 분석분은 server_result, 단말 자동종결분은 device_result 로 폴백 (대표 행)
     final server = state.raw!['server_result'] as Map<String, dynamic>?;
     final device = state.raw!['device_result'] as Map<String, dynamic>?;
-    final effective = server ?? device; // 양품(단말 전용)은 device_result로 fallback
+    final primary = server ?? device;
     final action = state.raw!['action_guide'] as Map<String, dynamic>?;
     final feedback = state.raw!['feedback'] as Map<String, dynamic>?;
 
-    _defectType = feedback?['modified_defect_type']?.toString() ?? effective?['defect_type']?.toString();
+    _defectType = feedback?['modified_defect_type']?.toString() ?? primary?['defect_type']?.toString();
     _severity = feedback?['severity']?.toString();
     _actionDetailCtrl.text = feedback?['final_action_content']?.toString() ?? action?['detail']?.toString() ?? '';
     _opinionCtrl.text = feedback?['opinion']?.toString() ?? '';
@@ -94,10 +95,11 @@ class _ResultReviewBodyState extends ConsumerState<_ResultReviewBody> {
 
     final server = state.raw?['server_result'] as Map<String, dynamic>?;
     final device = state.raw?['device_result'] as Map<String, dynamic>?;
-    final effective = server ?? device; // 양품(단말 전용)은 device_result로 fallback
+    final primary = server ?? device;          // 서버 분석분 우선, 없으면 단말 결과
     final action = state.raw?['action_guide'] as Map<String, dynamic>?;
     final feedback = state.raw?['feedback'] as Map<String, dynamic>?;
     final isEdit = state.isEditMode;
+    final top3 = (primary?['top3_predictions'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
     const defectChoices = [
       // 용접 (0~2)
@@ -155,9 +157,9 @@ class _ResultReviewBodyState extends ConsumerState<_ResultReviewBody> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('AI 판정: ${effective?['defect_type'] ?? '-'}', style: AppTextStyles.h3),
+                              Text('AI 판정: ${primary?['defect_type'] ?? '-'}', style: AppTextStyles.h3),
                               const SizedBox(height: 4),
-                              Text('신뢰도: ${((effective?['confidence'] ?? 0) * 100).toStringAsFixed(1)}%',
+                              Text('신뢰도: ${((primary?['confidence'] ?? 0) * 100).toStringAsFixed(1)}%',
                                   style: AppTextStyles.codeData),
                             ],
                           ),
@@ -167,6 +169,44 @@ class _ResultReviewBodyState extends ConsumerState<_ResultReviewBody> {
                   ),
                 ),
                 const SizedBox(height: 16),
+
+                // 추론 결과 (Top-3) — 모달과 동일한 단말/서버 추론 상위 3개
+                if (top3.isNotEmpty) ...[
+                  Text('추론 결과 (Top-3 Predictions)', style: AppTextStyles.labelBold),
+                  const SizedBox(height: 8),
+                  ...top3.asMap().entries.map((e) {
+                    final rank = e.key + 1;
+                    final conf = ((e.value['confidence'] as num?)?.toDouble()) ?? 0;
+                    final isTop = rank == 1;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(e.value['class']?.toString() ?? '-',
+                                  style: isTop ? AppTextStyles.labelBold : AppTextStyles.bodyMd),
+                              Text('${(conf * 100).toStringAsFixed(1)}%', style: AppTextStyles.codeData),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: conf.toDouble().clamp(0.0, 1.0),
+                              minHeight: isTop ? 12 : 10,
+                              backgroundColor: AppColors.outlineVariant,
+                              color: isTop ? AppColors.primaryContainer : AppColors.outline,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 16),
+                ],
 
                 // 결함 유형 판정
                 Text('결함 유형 판정 (Defect Type)', style: AppTextStyles.labelBold),
@@ -190,7 +230,7 @@ class _ResultReviewBodyState extends ConsumerState<_ResultReviewBody> {
                 ),
                 const SizedBox(height: 16),
 
-                // RAG 조치 가이드 (읽기 전용)
+                // 매뉴얼 기반 조치 가이드 (읽기 전용)
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -205,7 +245,7 @@ class _ResultReviewBodyState extends ConsumerState<_ResultReviewBody> {
                         children: [
                           const Icon(Icons.smart_toy, color: AppColors.onPrimaryContainer, size: 20),
                           const SizedBox(width: 8),
-                          Text('RAG 생성 조치 가이드', style: AppTextStyles.labelBold),
+                          Text('매뉴얼 기반 조치 가이드', style: AppTextStyles.labelBold),
                         ],
                       ),
                       const SizedBox(height: 8),

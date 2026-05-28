@@ -2,7 +2,7 @@
 
 > **배경**: 6공정별 6개 모델 → **단일 통합 모델 1개(30클래스)** 전환. 현재 `lib/` 는 `core/`(network·router·storage·theme·error)·placeholder screen 7개·로컬 `core/` 인프라만 존재합니다. Clean Architecture·TFLite 서비스·DTO·Riverpod notifier는 **전부 미구현**. 본 문서는 향후 06~14번 튜토리얼을 따라 구현할 때 단일 모델 정합을 보장하는 가이드입니다.
 >
-> **확정 사항**: 모델 파일 `assets/models/best_model_v5_datamatch_full.tflite` (30클래스), 양품 판별 `defectType.contains('양품')`, 신뢰도 임계값 전역 0.85, `currentProcessIdProvider`는 위치/RAG 메타용(모델 선택 무관).
+> **확정 사항**: 모델 파일 `assets/models/best_model_v5_datamatch_full.tflite` (30클래스), 양품 판별 `defectType.contains('양품')`, 신뢰도 임계값 전역 0.85, `currentProcessIdProvider`는 **위치 기록 메타용**(모델 선택 무관). 조치 가이드 룩업도 결함_유형 단독이므로 process_id 미사용.
 >
 > **참조**: `명세서/계획 변경 내용.md` §7, `frontend/design/PAGE/{02,05,06}_*/COMPONENT.md`, `tutorial/{09,11,13,14}`.
 
@@ -71,7 +71,7 @@ const double kServerRecheckThreshold = 0.70;
 ### 2-5. `lib/features/capture/presentation/providers/`
 ```dart
 final currentProcessIdProvider = StateProvider<int>((ref) => 1);
-// process_id는 위치 기록·RAG 매뉴얼 범위 한정용 메타. 모델 선택과 무관.
+// process_id는 위치 기록용 메타. 모델 선택·조치 가이드 룩업 모두 무관 (룩업은 결함_유형 단독).
 ```
 
 ### 2-6. `lib/features/tank_location/` (화면 2)
@@ -100,5 +100,5 @@ final currentProcessIdProvider = StateProvider<int>((ref) => 1);
 - TFLite 서비스 구현 예시: [tutorial/13_2주차_TFLite_단말_추론.md](../tutorial/13_2주차_TFLite_단말_추론.md)
 - 카메라/촬영 통합: [tutorial/09_화면5_카메라_촬영.md](../tutorial/09_화면5_카메라_촬영.md)
 - 결과 처리 드롭다운: [tutorial/11_화면6_결과처리.md](../tutorial/11_화면6_결과처리.md)
-- 백엔드 RAG/분류기: [tutorial/14_2주차_백엔드_RAG_정밀분석.md](../tutorial/14_2주차_백엔드_RAG_정밀분석.md)
+- 백엔드 매뉴얼 직접조회/분류기: [tutorial/14_2주차_백엔드_RAG_정밀분석.md](../tutorial/14_2주차_백엔드_RAG_정밀분석.md) *(파일명은 RAG지만 본문은 매뉴얼 직접조회로 정정됨)*
 - 백엔드 가이드: [backend/app/SINGLE_MODEL_GUIDE.md](../backend/app/SINGLE_MODEL_GUIDE.md)

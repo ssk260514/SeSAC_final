@@ -92,17 +92,13 @@ class OfflineQueueDb {
   }) async {
     final clientId = _uuid.v4();
 
-    // 이미지 보관 정책: 불량/저신뢰는 항상, 양품은 10% 샘플 대상만 보관.
-    // 비샘플링 양품은 메타만 동기화하면 되므로 디스크·통신 절약을 위해 이미지를 두지 않는다.
-    final keepImage = kind != 'pass' || needsSample;
-    String storedPath = '';
-    if (keepImage) {
-      final docs = await getApplicationDocumentsDirectory();
-      final queueDir = Directory(p.join(docs.path, 'queue_images'));
-      if (!await queueDir.exists()) await queueDir.create(recursive: true);
-      storedPath = p.join(queueDir.path, '$clientId.jpg');
-      await imageFile.copy(storedPath);
-    }
+    // 전수 보관: C-B에서 양품·불량 모두 서버 재추론·이미지 동봉이 필수이므로
+    // 큐의 모든 항목은 이미지를 보관한다. (needsSample 은 미사용 — 샘플링은 서버 결정)
+    final docs = await getApplicationDocumentsDirectory();
+    final queueDir = Directory(p.join(docs.path, 'queue_images'));
+    if (!await queueDir.exists()) await queueDir.create(recursive: true);
+    final storedPath = p.join(queueDir.path, '$clientId.jpg');
+    await imageFile.copy(storedPath);
 
     final database = await db;
     await database.insert('pending_uploads', {
